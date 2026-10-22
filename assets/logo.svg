@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+  <defs>
+    <linearGradient id="grad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#cc292b" />
+      <stop offset="100%" stop-color="#e04e47" />
+    </linearGradient>
+    <linearGradient id="glow" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#89b4fa" />
+      <stop offset="100%" stop-color="#cba6f7" />
+    </linearGradient>
+  </defs>
+  <!-- Background Rounded Squircle -->
+  <rect x="8" y="8" width="112" height="112" rx="28" fill="#1e1e2e" stroke="#313244" stroke-width="4"/>
+  <!-- Zotero Stylized 'Z' with AI Glow -->
+  <path d="M38 34 H88 L52 86 H92" fill="none" stroke="url(#grad)" stroke-width="14" stroke-linecap="round" stroke-linejoin="round" />
+  <!-- AI Sparkle Orb -->
+  <circle cx="94" cy="34" r="8" fill="url(#glow)" />
+  <circle cx="34" cy="86" r="6" fill="url(#glow)" />
+</svg>

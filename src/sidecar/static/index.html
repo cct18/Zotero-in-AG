@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Zotero in AG</title>
+  <link rel="stylesheet" href="/static/vendor/pdfjs/pdf_viewer.min.css">
+  <link rel="stylesheet" href="/static/css/app.css">
+  <script src="/static/vendor/pdfjs/pdf.min.js"></script>
+</head>
+<body>
+  <!-- Top App Header -->
+  <header class="app-header">
+    <div class="logo-group">
+      <!-- Antigravity Native layout-sidebar-left icon -->
+      <button id="toggleSidebarBtn" class="btn btn-icon" title="折叠/展开文献目录侧边栏">
+        <svg width="15" height="15" viewBox="0 0 16 16" fill="currentColor">
+          <path fill-rule="evenodd" clip-rule="evenodd" d="M2 3.5C2 2.67157 2.67157 2 3.5 2H12.5C13.3284 2 14 2.67157 14 3.5V12.5C14 13.3284 13.3284 14 12.5 14H3.5C2.67157 14 2 13.3284 2 12.5V3.5ZM6 3H3.5C3.22386 3 3 3.22386 3 3.5V12.5C3 12.7761 3.22386 13 3.5 13H6V3ZM7 13H12.5C12.7761 13 13 12.7761 13 12.5V3.5C13 3.22386 12.7761 3 12.5 3H7V13Z"/>
+        </svg>
+      </button>
+      <span class="logo-icon">📖</span>
+      <span class="app-title">Zotero in AG</span>
+    </div>
+    <div id="statusBadge" class="status-badge">
+      <span class="status-dot"></span> 检测连接中...
+    </div>
+  </header>
+
+  <!-- Main View -->
+  <div class="main-container">
+    <!-- Left Sidebar: Collections & Items -->
+    <aside id="sidebar" class="sidebar">
+      <div class="search-box">
+        <div class="search-input-wrapper">
+          <span class="search-icon">🔍</span>
+          <input type="text" id="searchInput" class="search-input" placeholder="搜索文献、作者或关键词...">
+        </div>
+      </div>
+
+      <div class="sidebar-section-title">文献目录 (COLLECTIONS)</div>
+      <div id="collectionsList" class="collections-panel">
+        <!-- Rendered via JS: Book, Classic, etc. -->
+      </div>
+
+      <div id="itemsSectionHeader" class="sidebar-section-title" style="display: none;">文献列表 (ITEMS)</div>
+      <div id="itemsList" class="items-list">
+        <!-- Initially empty until a collection is selected -->
+      </div>
+    </aside>
+
+    <!-- Right Content Area -->
+    <main id="contentArea" class="content-area">
+      <!-- Empty Initial State (Clean Default Blank Area) -->
+      <div id="emptyState" class="empty-state">
+        <div class="empty-icon">📚</div>
+        <h2>Zotero in AG</h2>
+      </div>
+
+      <!-- Paper & PDF Viewer (Occupies full space when paper is opened) -->
+      <div id="paperViewer" class="paper-viewer" style="display: none;">
+        <!-- Paper Detail Header -->
+        <div class="detail-toolbar">
+          <div class="paper-summary-head">
+            <div id="paperTitle" class="paper-head-title">论文标题</div>
+            <div id="paperMeta" class="paper-head-meta">作者 · 年份 · 出版物</div>
+          </div>
+          <div class="action-buttons">
+            <button id="askAgentBtn" class="btn btn-primary" title="将论文核心贡献与总结生成 Agent 对话">
+              💬 Ask Agent
+            </button>
+            <button id="copyBibtexBtn" class="btn" title="复制 BibTeX 引用条目">
+              📋 BibTeX
+            </button>
+            <button id="openInZoteroBtn" class="btn" title="调起本地 Zotero 客户端并聚焦此论文条目">
+              🔗 定位条目
+            </button>
+          </div>
+        </div>
+
+        <!-- PDF Reader Controls Toolbar -->
+        <div class="pdf-controls">
+          <button id="prevPageBtn" class="btn btn-nav" title="上一页">◀</button>
+          <span id="pageIndicator" class="page-indicator">0 / 0</span>
+          <button id="nextPageBtn" class="btn btn-nav" title="下一页">▶</button>
+          <span class="control-divider">|</span>
+          <button id="zoomOutBtn" class="btn btn-nav" title="缩小">－</button>
+          <span id="zoomPercent" class="zoom-badge" title="当前缩放比">125%</span>
+          <button id="zoomInBtn" class="btn btn-nav" title="放大">＋</button>
+          <button id="zoomFitBtn" class="btn btn-nav" title="适应窗口宽度">适应宽度</button>
+        </div>
+
+        <!-- Continuous Scroll PDF Render Container (Stretches Full Width/Height) -->
+        <div id="pdfContainer" class="pdf-container">
+          <!-- Continuous pages dynamically appended here -->
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <!-- Floating Selection Tooltip -->
+  <div id="selectionTooltip" class="selection-tooltip">
+    <button id="tooltipAskBtn" class="selection-btn">
+      💬 问 Agent
+    </button>
+    <button id="tooltipCopyBtn" class="selection-btn">
+      📋 引用
+    </button>
+  </div>
+
+  <!-- Global Toast -->
+  <div id="toast" class="toast">提示信息</div>
+
+  <script src="/static/js/app.js"></script>
+</body>
+</html>

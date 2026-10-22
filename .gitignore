@@ -1,0 +1,29 @@
+# Python cache and build artifacts
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+.pytest_cache/
+
+# Virtual environments
+.venv/
+env/
+venv/
+
+# Logs and runtime artifacts
+*.log
+zotero_debug*.log
+zotero_debug_err*.log
+
+# Operating system files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# IDE and Editor configurations
+.vscode/
+.idea/
+*.swp
+*.swo

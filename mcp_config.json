@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "zotero": {
+      "command": "uv",
+      "args": [
+        "run",
+        "python",
+        "src/mcp_server/server.py"
+      ]
+    }
+  }
+}

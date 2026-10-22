@@ -1,0 +1,24 @@
+{
+  "command": "uv",
+  "args": [
+    "--directory",
+    "../..",
+    "run",
+    "python",
+    "src/sidecar/server.py"
+  ],
+  "restart_policy": "always",
+  "display_name": "Zotero in AG",
+  "description": "Zotero in AG literature manager & PDF reader in Antigravity Auxiliary Pane",
+  "has_web_ui": true,
+  "ui_config": {
+    "display_name": "Zotero in AG",
+    "views": [
+      {
+        "path": "/",
+        "entrypoint": "SIDECAR_UI_ENTRYPOINT_AUX_PANE",
+        "title": "Zotero in AG"
+      }
+    ]
+  }
+}

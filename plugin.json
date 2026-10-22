@@ -1,0 +1,12 @@
+{
+  "name": "zotero-in-ag",
+  "displayName": "Zotero in AG",
+  "description": "Seamlessly integrates Zotero into Antigravity with Aux Pane PDF reader, library manager, and MCP research tools.",
+  "version": "1.0.0",
+  "logo": "assets/logo.svg",
+  "suggestedPrompts": [
+    "/zotero",
+    "在预览侧边栏打开 Zotero in AG",
+    "精读当前选中的论文并生成独立笔记"
+  ]
+}
