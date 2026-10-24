@@ -16,6 +16,7 @@ venv/
 *.log
 zotero_debug*.log
 zotero_debug_err*.log
+*annotations_cache.json
 
 # Operating system files
 .DS_Store

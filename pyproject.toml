@@ -1,6 +1,6 @@
 [project]
 name = "zotero-in-ag"
-version = "1.0.0"
+version = "2.0.0"
 description = "Zotero in AG: Native literature viewer, PDF reader, and MCP academic tools for Google Antigravity."
 readme = "README.md"
 authors = [

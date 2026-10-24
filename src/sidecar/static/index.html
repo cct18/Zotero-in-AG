@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Zotero in AG</title>
   <link rel="stylesheet" href="/static/vendor/pdfjs/pdf_viewer.min.css">
-  <link rel="stylesheet" href="/static/css/app.css">
+  <link rel="stylesheet" href="/static/css/app.css?v=1.1.0.11">
   <script src="/static/vendor/pdfjs/pdf.min.js"></script>
 </head>
 <body>
@@ -13,9 +13,15 @@
   <header class="app-header">
     <div class="logo-group">
       <!-- Antigravity Native layout-sidebar-left icon -->
-      <button id="toggleSidebarBtn" class="btn btn-icon" title="折叠/展开文献目录侧边栏">
+      <button id="toggleSidebarBtn" class="btn btn-icon" data-tooltip="折叠/展开侧边栏" data-tooltip-pos="left">
         <svg width="15" height="15" viewBox="0 0 16 16" fill="currentColor">
           <path fill-rule="evenodd" clip-rule="evenodd" d="M2 3.5C2 2.67157 2.67157 2 3.5 2H12.5C13.3284 2 14 2.67157 14 3.5V12.5C14 13.3284 13.3284 14 12.5 14H3.5C2.67157 14 2 13.3284 2 12.5V3.5ZM6 3H3.5C3.22386 3 3 3.22386 3 3.5V12.5C3 12.7761 3.22386 13 3.5 13H6V3ZM7 13H12.5C12.7761 13 13 12.7761 13 12.5V3.5C13 3.22386 12.7761 3 12.5 3H7V13Z"/>
+        </svg>
+      </button>
+      <!-- Settings icon button (Antigravity bottom-left 6-tooth gear) -->
+      <button id="settingsBtn" class="btn btn-icon" data-tooltip="设置" data-tooltip-pos="left">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor">
+          <path d="M12 9a3 3 0 1 0 0 6a3 3 0 1 0 0-6m0 4.5a1.5 1.5 0 1 1 .001-3.001A1.5 1.5 0 0 1 12 13.5m9.848 1.072l-1.93-1.63a1.232 1.232 0 0 1 0-1.884l1.93-1.63a.62.62 0 0 0 .189-.662a10.5 10.5 0 0 0-2.209-3.804a.62.62 0 0 0-.668-.168l-2.381.848a1.3 1.3 0 0 1-.419.073a1.24 1.24 0 0 1-1.219-1.014l-.454-2.478a.62.62 0 0 0-.482-.493a10.7 10.7 0 0 0-4.408 0a.62.62 0 0 0-.482.493l-.453 2.478a1.24 1.24 0 0 1-1.638.942l-2.38-.848a.62.62 0 0 0-.669.168a10.5 10.5 0 0 0-2.21 3.805a.615.615 0 0 0 .189.661l1.929 1.63q.077.066.143.143c.444.52.379 1.299-.143 1.742l-1.929 1.63a.62.62 0 0 0-.189.662a10.5 10.5 0 0 0 2.21 3.803a.62.62 0 0 0 .669.168l2.38-.847a1.3 1.3 0 0 1 .419-.072c.588 0 1.11.417 1.219 1.014l.453 2.478a.62.62 0 0 0 .482.493a10.7 10.7 0 0 0 4.408 0a.62.62 0 0 0 .482-.493l.454-2.478q.018-.099.053-.194a1.24 1.24 0 0 1 1.585-.748l2.379.848q.105.036.208.036a.62.62 0 0 0 .461-.204a10.5 10.5 0 0 0 2.208-3.804a.615.615 0 0 0-.189-.662zm-2.756 3.017l-1.81-.645a2.747 2.747 0 0 0-3.615 2.085l-.345 1.877a9.2 9.2 0 0 1-2.642-.002l-.344-1.876a2.737 2.737 0 0 0-3.616-2.085l-1.81.644a8.9 8.9 0 0 1-1.319-2.266l1.461-1.235c.56-.472.9-1.135.96-1.864a2.7 2.7 0 0 0-.645-1.995a3 3 0 0 0-.315-.315L3.591 8.677A8.9 8.9 0 0 1 4.91 6.412l1.81.645q.447.158.921.159a2.75 2.75 0 0 0 2.695-2.244l.344-1.876a9.3 9.3 0 0 1 2.642-.002l.343 1.877a2.737 2.737 0 0 0 3.617 2.085l1.81-.645c.552.69.993 1.449 1.319 2.266l-1.46 1.235a2.7 2.7 0 0 0-.96 1.864a2.71 2.71 0 0 0 .962 2.31l1.46 1.234a8.9 8.9 0 0 1-1.318 2.267z"/>
         </svg>
       </button>
       <span class="logo-icon">📖</span>
@@ -42,7 +48,18 @@
         <!-- Rendered via JS: Book, Classic, etc. -->
       </div>
 
-      <div id="itemsSectionHeader" class="sidebar-section-title" style="display: none;">文献列表 (ITEMS)</div>
+      <div id="itemsHeaderRow" class="items-header-row" style="display: none;">
+        <span id="itemsSectionHeader" class="sidebar-section-title">文献列表 (ITEMS)</span>
+        <button id="sortDateBtn" class="btn btn-icon btn-sort" data-tooltip="按发表时间排序" data-tooltip-pos="right">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="m3 16 4 4 4-4"/>
+            <path d="M7 20V4"/>
+            <path d="M11 4h10"/>
+            <path d="M11 8h7"/>
+            <path d="M11 12h4"/>
+          </svg>
+        </button>
+      </div>
       <div id="itemsList" class="items-list">
         <!-- Initially empty until a collection is selected -->
       </div>
@@ -97,19 +114,249 @@
     </main>
   </div>
 
-  <!-- Floating Selection Tooltip -->
+  <!-- Floating Selection Tooltip & Zotero Marking Toolbar -->
   <div id="selectionTooltip" class="selection-tooltip">
-    <button id="tooltipAskBtn" class="selection-btn">
-      💬 问 Agent
-    </button>
-    <button id="tooltipCopyBtn" class="selection-btn">
-      📋 引用
-    </button>
+    <!-- Row 1: 8 Color Swatches (Figure 1 Top Row) & Clear/Eraser Button -->
+    <div class="annotation-colors-row">
+      <button type="button" class="ann-color-btn" data-color="#ffd400" style="background: #ffd400;"></button>
+      <button type="button" class="ann-color-btn" data-color="#ff6666" style="background: #ff6666;"></button>
+      <button type="button" class="ann-color-btn" data-color="#5fb236" style="background: #5fb236;"></button>
+      <button type="button" class="ann-color-btn" data-color="#2ea8e5" style="background: #2ea8e5;"></button>
+      <button type="button" class="ann-color-btn" data-color="#a28ae5" style="background: #a28ae5;"></button>
+      <button type="button" class="ann-color-btn" data-color="#e56eee" style="background: #e56eee;"></button>
+      <button type="button" class="ann-color-btn" data-color="#f19837" style="background: #f19837;"></button>
+      <button type="button" class="ann-color-btn" data-color="#aaaaaa" style="background: #aaaaaa;"></button>
+      <div class="ann-color-divider"></div>
+      <button type="button" id="clearAnnotationBtn" class="ann-clear-btn" aria-label="Clear annotation">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="m7 21-4.3-4.3c-1-1-1-2.5 0-3.4l9.6-9.6c1-1 2.5-1 3.4 0l5.6 5.6c1 1 1 2.5 0 3.4L13 21"/>
+          <path d="M22 21H7"/>
+          <path d="m5 11 9 9"/>
+        </svg>
+      </button>
+    </div>
+
+    <!-- Row 2: Mode Toggle & Action Vector Buttons (No tooltip, minimal layout) -->
+    <div class="annotation-actions-row">
+      <!-- Highlight [A] / Underline [A_] Segmented Pill (Figure 1 Bottom Row) -->
+      <div class="ann-mode-segment">
+        <button type="button" id="modeHighlightBtn" class="ann-mode-btn active">
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
+            <path fill-rule="evenodd" clip-rule="evenodd" d="M1 2.5A1.5 1.5 0 0 1 2.5 1h11A1.5 1.5 0 0 1 15 2.5v11a1.5 1.5 0 0 1-1.5 1.5h-11A1.5 1.5 0 0 1 1 13.5v-11zM2.5 2a.5.5 0 0 0-.5.5v11a.5.5 0 0 0 .5.5h11a.5.5 0 0 0 .5-.5v-11a.5.5 0 0 0-.5-.5h-11zM7.3 4.2h1.4l2.8 7.6H10l-.7-2H6.7l-.7 2H4.5l2.8-7.6zm1.7 4.3L8 5.6 7 8.5h2z"/>
+          </svg>
+        </button>
+        <button type="button" id="modeUnderlineBtn" class="ann-mode-btn">
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
+            <path d="M7.3 2.5h1.4l2.8 7.6H10l-.7-2H6.7l-.7 2H4.5l2.8-7.6zm1.7 4.3L8 3.9 7 6.8h2zM3 13h10v1.2H3V13z"/>
+          </svg>
+        </button>
+      </div>
+
+      <div class="ann-btn-divider"></div>
+
+      <!-- Translate Icon Button (Pure Vector SVG) -->
+      <button type="button" id="tooltipTranslateBtn" class="ann-action-icon-btn">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="m5 8 6 6"/>
+          <path d="m4 14 6-6 2-3"/>
+          <path d="M2 5h12"/>
+          <path d="M7 2h1"/>
+          <path d="m22 22-5-10-5 10"/>
+          <path d="M14 18h6"/>
+        </svg>
+      </button>
+
+      <!-- Ask Agent Icon Button (Pure Vector SVG) -->
+      <button type="button" id="tooltipAskBtn" class="ann-action-icon-btn">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="m3 21 1.9-5.7a8.5 8.5 0 1 1 3.8 3.8z"/>
+        </svg>
+      </button>
+
+      <!-- Quote Icon Button (Pure Vector SVG) -->
+      <button type="button" id="tooltipCopyBtn" class="ann-action-icon-btn">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M3 21c3 0 7-1 7-8V5c0-1.25-.75-2-2-2H4c-1.25 0-2 .75-2 2v6c0 1.25.75 2 2 2h4c0 4-2 6-5 6z"/>
+          <path d="M15 21c3 0 7-1 7-8V5c0-1.25-.75-2-2-2h-4c-1.25 0-2 .75-2 2v6c0 1.25.75 2 2 2h4c0 4-2 6-5 6z"/>
+        </svg>
+      </button>
+    </div>
+
+    <!-- Row 3: Translation Card (Figure 2, toggleable) -->
+    <div id="tooltipTranslationCard" class="translation-card" style="display: none;">
+      <div id="transPhoneticsRow" class="phonetics-row" style="display: none;">
+        <button type="button" id="speakUsBtn" class="phonetic-pill">
+          <span class="sound-icon">🔊</span> 美 <span id="usPhoneText"></span>
+        </button>
+        <button type="button" id="speakUkBtn" class="phonetic-pill">
+          <span class="sound-icon">🔊</span> 英国 <span id="ukPhoneText"></span>
+        </button>
+      </div>
+      <div id="transResultBody" class="translation-body">正在查询释义...</div>
+      <div class="card-resize-grip"></div>
+    </div>
+  </div>
+
+  <!-- Settings Modal Dialog -->
+  <div id="settingsModal" class="modal-overlay" style="display: none;">
+    <div class="modal-dialog">
+      <div class="modal-header">
+        <div class="modal-title">设置</div>
+        <button id="closeSettingsBtn" class="btn btn-icon" data-tooltip="关闭" data-tooltip-pos="left">✕</button>
+      </div>
+
+      <div class="modal-body">
+        <!-- Sidebar Navigation Tabs inside Settings -->
+        <div class="settings-nav">
+          <button class="settings-nav-item active" data-tab="appearance">外观</button>
+          <button class="settings-nav-item" data-tab="prompts">配置</button>
+          <button class="settings-nav-item" data-tab="translation">翻译</button>
+        </div>
+
+        <!-- Tab Contents Area -->
+        <div class="settings-content">
+          <!-- 1. Appearance Tab -->
+          <div id="tabAppearance" class="tab-pane active">
+            <!-- Theme Mode with Antigravity Vector SVGs -->
+            <div class="setting-group">
+              <label class="setting-label">主题模式</label>
+              <div class="setting-options-row">
+                <label class="setting-radio-card">
+                  <input type="radio" name="themeMode" value="dark" checked>
+                  <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
+                    <path fill-rule="evenodd" clip-rule="evenodd" d="M6.16 2.054a.75.75 0 0 1 .802.162 6 6 0 1 0 6.822 6.822.75.75 0 0 1 .964.964A7.5 7.5 0 1 1 5.196 1.09a.75.75 0 0 1 .964.964z"/>
+                  </svg>
+                  <span>深色模式</span>
+                </label>
+                <label class="setting-radio-card">
+                  <input type="radio" name="themeMode" value="light">
+                  <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
+                    <path fill-rule="evenodd" clip-rule="evenodd" d="M8 10.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5zM8 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM8 0a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0v-1.5A.75.75 0 0 1 8 0zm0 13a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0v-1.5A.75.75 0 0 1 8 13zm8-5a.75.75 0 0 1-.75.75h-1.5a.75.75 0 0 1 0-1.5h1.5A.75.75 0 0 1 16 8zM3 8a.75.75 0 0 1-.75.75h-1.5a.75.75 0 0 1 0-1.5h1.5A.75.75 0 0 1 3 8zm10.657-5.657a.75.75 0 0 1 0 1.06l-1.06 1.061a.75.75 0 1 1-1.061-1.06l1.06-1.061a.75.75 0 0 1 1.061 0zm-9.193 9.192a.75.75 0 0 1 0 1.061l-1.06 1.06a.75.75 0 0 1-1.061-1.06l1.06-1.061a.75.75 0 0 1 1.061 0zm9.193 1.061a.75.75 0 0 1-1.061 0l-1.06-1.06a.75.75 0 1 1 1.06-1.061l1.061 1.06a.75.75 0 0 1 0 1.061zm-9.193-9.192a.75.75 0 0 1-1.061 0L2.343 2.343a.75.75 0 1 1 1.06-1.06l1.061 1.06a.75.75 0 0 1 0 1.06z"/>
+                  </svg>
+                  <span>浅色模式</span>
+                </label>
+              </div>
+            </div>
+
+            <!-- Accent Color -->
+            <div class="setting-group">
+              <label class="setting-label">个性化强调色</label>
+              <div class="setting-color-row">
+                <button type="button" class="color-dot active" data-color="#89b4fa" style="background: #89b4fa;" title="经典蓝"></button>
+                <button type="button" class="color-dot" data-color="#a6e3a1" style="background: #a6e3a1;" title="清新绿"></button>
+                <button type="button" class="color-dot" data-color="#cba6f7" style="background: #cba6f7;" title="优雅紫"></button>
+                <button type="button" class="color-dot" data-color="#fab387" style="background: #fab387;" title="暖阳橙"></button>
+                <button type="button" class="color-dot" data-color="#f38ba8" style="background: #f38ba8;" title="珊瑚粉"></button>
+              </div>
+            </div>
+
+            <!-- PDF Reading Mode / Filter -->
+            <div class="setting-group">
+              <label class="setting-label">PDF 阅览与护眼底色</label>
+              <div class="setting-options-row">
+                <label class="setting-radio-card">
+                  <input type="radio" name="pdfFilter" value="normal" checked>
+                  <span>标准白底</span>
+                </label>
+                <label class="setting-radio-card">
+                  <input type="radio" name="pdfFilter" value="sepia">
+                  <span>护眼暖黄</span>
+                </label>
+                <label class="setting-radio-card">
+                  <input type="radio" name="pdfFilter" value="dark">
+                  <span>暗调反色</span>
+                </label>
+              </div>
+            </div>
+          </div>
+
+          <!-- 2. Prompts Configuration Tab -->
+          <div id="tabPrompts" class="tab-pane" style="display: none;">
+            <!-- Full-text Ask Prompt -->
+            <div class="setting-group">
+              <div class="setting-group-head">
+                <label class="setting-label">整文 Ask Agent 提示词模板</label>
+                <button type="button" id="resetFullPromptBtn" class="btn-text">恢复默认</button>
+              </div>
+              <textarea id="fullTextPromptInput" class="setting-textarea" rows="4" placeholder="输入整文提问模板..."></textarea>
+              <div class="setting-hint">支持插槽：<code>{title}</code> (论文标题), <code>{authors}</code> (作者), <code>{year}</code> (年份)</div>
+            </div>
+
+            <!-- Selection Tooltip Ask Prompt -->
+            <div class="setting-group">
+              <div class="setting-group-head">
+                <label class="setting-label">划词 Ask Agent 提示词模板</label>
+                <button type="button" id="resetSelectionPromptBtn" class="btn-text">恢复默认</button>
+              </div>
+              <textarea id="selectionPromptInput" class="setting-textarea" rows="4" placeholder="输入划词提问模板..."></textarea>
+              <div class="setting-hint">支持插槽：<code>{title}</code> (论文标题), <code>{selected_text}</code> (选中文本)</div>
+            </div>
+          </div>
+
+          <!-- 3. Translation Configuration Tab -->
+          <div id="tabTranslation" class="tab-pane" style="display: none;">
+            <!-- Translation Engine Radio Cards -->
+            <div class="setting-group">
+              <label class="setting-label">翻译引擎模式</label>
+              <div class="setting-options-row">
+                <label class="setting-radio-card active">
+                  <input type="radio" name="transEngine" value="builtin" checked>
+                  <span>内置学术引擎 (免配置)</span>
+                </label>
+                <label class="setting-radio-card">
+                  <input type="radio" name="transEngine" value="custom">
+                  <span>自定义 AI 模型 (API Key)</span>
+                </label>
+              </div>
+              <div class="setting-hint">内置引擎支持英美音标与发音播报，秒级学术长句直连；自定义模型支持 DeepSeek、OpenAI、Claude 等。</div>
+            </div>
+
+            <!-- Custom AI Model Settings (toggled when custom engine is chosen) -->
+            <div id="customAiModelGroup" style="display: none; flex-direction: column; gap: 14px;">
+              <div class="setting-group">
+                <label class="setting-label">API 服务地址 (Base URL)</label>
+                <input type="text" id="transApiBaseInput" class="setting-input" placeholder="https://api.deepseek.com/v1 或 https://api.openai.com/v1">
+                <div class="setting-hint">兼容所有 OpenAI 格式接口 (DeepSeek, OpenAI, Kimi, 智谱, OneAPI 等)</div>
+              </div>
+
+              <div class="setting-group">
+                <label class="setting-label">API 密钥 (API Key)</label>
+                <input type="password" id="transApiKeyInput" class="setting-input" placeholder="sk-...">
+                <div class="setting-hint">密钥仅保存在本地浏览器 LocalStorage，安全不上传</div>
+              </div>
+
+              <div class="setting-group">
+                <label class="setting-label">模型名称 (Model)</label>
+                <input type="text" id="transModelInput" class="setting-input" placeholder="deepseek-chat 或 gpt-4o-mini">
+              </div>
+
+              <div class="setting-group">
+                <div class="setting-group-head">
+                  <label class="setting-label">学术翻译 System Prompt</label>
+                  <button type="button" id="resetTransPromptBtn" class="btn-text">恢复默认</button>
+                </div>
+                <textarea id="transPromptInput" class="setting-textarea" rows="3" placeholder="输入学术翻译提示词..."></textarea>
+              </div>
+
+              <div class="setting-group" style="flex-direction: row; align-items: center; gap: 10px;">
+                <button type="button" id="testTransApiBtn" class="btn btn-secondary">测试模型连接</button>
+                <span id="testApiStatus" style="font-size: 11.5px; color: var(--fg-muted);"></span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="modal-footer">
+        <button id="cancelSettingsBtn" class="btn">取消</button>
+        <button id="saveSettingsBtn" class="btn btn-primary">保存设置</button>
+      </div>
+    </div>
   </div>
 
   <!-- Global Toast -->
   <div id="toast" class="toast">提示信息</div>
 
-  <script src="/static/js/app.js"></script>
+  <script src="/static/js/app.js?v=1.1.0.11"></script>
 </body>
 </html>

@@ -13,6 +13,32 @@
   --badge-pdf: #a6e3a1;
   --badge-pdf-bg: rgba(166, 227, 161, 0.15);
   --font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --modal-bg: #181825;
+  --tooltip-bg: #181825;
+  --tooltip-fg: #cdd6f4;
+  --tooltip-border: var(--border-color);
+  --tooltip-shadow: 0 4px 14px rgba(0, 0, 0, 0.5);
+}
+
+[data-theme="light"] {
+  --bg-primary: #f8f9fa;
+  --bg-secondary: #ffffff;
+  --bg-card: #f1f3f5;
+  --bg-card-active: #e2e6ea;
+  --fg-primary: #1f2937;
+  --fg-muted: #4b5563;
+  --fg-subtle: #9ca3af;
+  --border-color: #e5e7eb;
+  --accent-color: #1a73e8;
+  --accent-hover: #1557b0;
+  --accent-fg: #ffffff;
+  --badge-pdf: #15803d;
+  --badge-pdf-bg: rgba(21, 128, 61, 0.12);
+  --modal-bg: #ffffff;
+  --tooltip-bg: #ffffff;
+  --tooltip-fg: #1f2937;
+  --tooltip-border: #d1d5db;
+  --tooltip-shadow: 0 4px 14px rgba(0, 0, 0, 0.12);
 }
 
 * {
@@ -60,11 +86,16 @@ body {
   color: var(--fg-muted);
   border-radius: 4px;
   cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.btn-icon svg {
+  pointer-events: none;
 }
 
 .btn-icon:hover {
   background: var(--bg-card);
-  color: var(--fg-primary);
+  color: var(--accent-color);
   border-color: var(--border-color);
 }
 
@@ -166,6 +197,111 @@ body {
   letter-spacing: 0.6px;
   color: var(--fg-subtle);
   user-select: none;
+}
+
+/* Items List Header Bar with Sorting */
+.items-header-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 10px 4px 12px;
+  user-select: none;
+  gap: 8px;
+  position: relative;
+  z-index: 10;
+}
+
+.items-header-row .sidebar-section-title {
+  padding: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.btn-sort {
+  padding: 3px 6px;
+  border-radius: 4px;
+  color: var(--fg-muted);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: 1px solid transparent;
+  transition: all 0.15s ease;
+  flex-shrink: 0;
+}
+
+.btn-sort svg {
+  pointer-events: none;
+}
+
+.btn-sort:hover {
+  background: var(--bg-card);
+  color: var(--accent-color);
+  border-color: var(--border-color);
+}
+
+/* Fast High-Performance Tooltips (50ms Instant Display) */
+[data-tooltip] {
+  position: relative;
+}
+
+[data-tooltip]::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  top: calc(100% + 6px);
+  background: var(--tooltip-bg, #181825);
+  color: var(--tooltip-fg, #cdd6f4);
+  font-size: 11px;
+  line-height: 1.3;
+  font-weight: 500;
+  padding: 4px 8px;
+  border-radius: 4px;
+  border: 1px solid var(--tooltip-border, var(--border-color));
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  visibility: hidden;
+  box-shadow: var(--tooltip-shadow, 0 4px 14px rgba(0, 0, 0, 0.5));
+  z-index: 9999;
+  transition: opacity 0.08s ease, transform 0.08s ease;
+  transition-delay: 0.05s; /* 50ms fast display */
+}
+
+/* Default / centered */
+[data-tooltip]::after {
+  left: 50%;
+  transform: translateX(-50%) translateY(-2px);
+}
+
+[data-tooltip]:hover::after {
+  opacity: 1;
+  visibility: visible;
+  transform: translateX(-50%) translateY(0);
+}
+
+/* Right-aligned for controls near right edge (like sortDateBtn) */
+[data-tooltip-pos="right"]::after {
+  left: auto;
+  right: 0;
+  transform: translateY(-2px);
+}
+
+[data-tooltip-pos="right"]:hover::after {
+  transform: translateY(0);
+}
+
+/* Left-aligned for controls near left edge (like toggleSidebarBtn) */
+[data-tooltip-pos="left"]::after {
+  left: 0;
+  right: auto;
+  transform: translateY(-2px);
+}
+
+[data-tooltip-pos="left"]:hover::after {
+  transform: translateY(0);
 }
 
 /* Collections Bar */
@@ -411,63 +547,372 @@ body {
   display: block;
 }
 
-/* Text layer for selection */
+/* Text layer for precise Zotero-grade selection */
 .textLayer {
   position: absolute;
-  left: 0;
-  top: 0;
-  right: 0;
-  bottom: 0;
+  text-align: initial;
+  inset: 0;
   overflow: hidden;
-  opacity: 0.25;
-  line-height: 1.0;
+  opacity: 1 !important;
+  line-height: 1;
+  -webkit-text-size-adjust: none;
+  -moz-text-size-adjust: none;
+  text-size-adjust: none;
+  forced-color-adjust: none;
+  transform-origin: 0 0;
+  z-index: 2;
+  pointer-events: auto;
+  user-select: text;
+  -webkit-user-select: text;
 }
 
-.textLayer span {
-  color: transparent;
+.textLayer :is(span, br) {
+  color: transparent !important;
   position: absolute;
   white-space: pre;
   cursor: text;
-  transform-origin: 0% 0%;
+  transform-origin: 0 0;
+  z-index: 1; /* Keep actual text spans above endOfContent */
+}
+
+.textLayer br::selection {
+  background: transparent !important;
+}
+
+/* Zotero Selection Shield: endOfContent */
+.textLayer .endOfContent {
+  display: block;
+  position: absolute;
+  left: 0;
+  top: 100%;
+  right: 0;
+  bottom: 0;
+  z-index: 0;
+  cursor: default;
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  user-select: none;
+  pointer-events: none;
+}
+
+.textLayer.selecting .endOfContent {
+  top: 0;
+  display: block;
 }
 
 .textLayer ::selection {
-  background: rgba(137, 180, 250, 0.7);
+  background: rgba(137, 180, 250, 0.45) !important;
+  color: transparent !important;
 }
 
-/* Selection Action Tooltip */
+[data-theme="light"] .textLayer ::selection {
+  background: rgba(59, 130, 246, 0.35) !important;
+  color: transparent !important;
+}
+
+/* Selection Action Tooltip & Zotero Marking Toolbar (Figures 1 & 2) */
 .selection-tooltip {
   position: absolute;
   display: none;
+  flex-direction: column;
   background: var(--bg-secondary);
-  border: 1px solid var(--accent-color);
-  border-radius: 6px;
-  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.5);
-  padding: 4px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  padding: 6px 8px;
   z-index: 999;
-  gap: 4px;
+  gap: 5px;
+  width: auto;
+  min-width: 200px;
+  max-width: 310px;
+  user-select: none;
+  animation: tooltipFadeIn 0.12s ease-out;
+}
+
+[data-theme="light"] .selection-tooltip {
+  background: #ffffff;
+  border-color: #d1d5db;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
+}
+
+@keyframes tooltipFadeIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 
 .selection-tooltip.show {
   display: flex;
 }
 
-.selection-btn {
+/* Row 1: 8 Zotero Color Swatches (Figure 1 Top Row) */
+.annotation-colors-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 5px;
+  padding: 1px 2px 3px 2px;
+}
+
+.ann-color-btn {
+  width: 17px;
+  height: 17px;
+  border-radius: 3px;
+  border: 1px solid rgba(0, 0, 0, 0.15);
+  cursor: pointer;
+  transition: transform 0.12s ease, box-shadow 0.12s ease;
+  padding: 0;
+  outline: none;
+  flex-shrink: 0;
+}
+
+.ann-color-btn:hover {
+  transform: scale(1.18);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35);
+}
+
+.ann-color-btn:active {
+  transform: scale(0.95);
+}
+
+.ann-color-divider {
+  width: 1px;
+  height: 14px;
+  background: var(--border-color);
+  margin: 0 1px;
+  flex-shrink: 0;
+}
+
+.ann-clear-btn {
+  width: 18px;
+  height: 18px;
+  border-radius: 3px;
+  border: 1px dashed var(--border-color);
+  background: transparent;
+  color: var(--fg-muted);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s ease;
+  padding: 0;
+  outline: none;
+  flex-shrink: 0;
+}
+
+.ann-clear-btn:hover {
+  border-color: #f38ba8;
+  color: #f38ba8;
+  background: rgba(243, 139, 168, 0.12);
+  transform: scale(1.1);
+}
+
+.ann-clear-btn:active {
+  transform: scale(0.95);
+}
+
+.ann-clear-btn svg {
+  pointer-events: none;
+}
+
+/* Row 2: Mode Toggle & Action Buttons (Figure 1 Bottom Row) */
+.annotation-actions-row {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding-top: 1px;
+}
+
+/* Highlight / Underline Segmented Pill */
+.ann-mode-segment {
+  display: flex;
+  align-items: center;
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  padding: 2px;
+  gap: 2px;
+}
+
+[data-theme="light"] .ann-mode-segment {
+  background: #f1f3f5;
+  border-color: #e5e7eb;
+}
+
+.ann-mode-btn {
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--fg-muted);
+  width: 26px;
+  height: 22px;
+  border-radius: 4px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s ease;
+  padding: 0;
+}
+
+.ann-mode-btn:hover {
+  color: var(--fg-primary);
+}
+
+.ann-mode-btn.active {
+  background: var(--bg-secondary);
+  border-color: var(--border-color);
+  color: var(--accent-color);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
+}
+
+[data-theme="light"] .ann-mode-btn.active {
+  background: #ffffff;
+  border-color: #d1d5db;
+  color: var(--accent-color);
+}
+
+.ann-btn-divider {
+  width: 1px;
+  height: 16px;
+  background: var(--border-color);
+  margin: 0 1px;
+}
+
+/* Vector Action Icon Buttons (Translate, Ask Agent, Quote) */
+.ann-action-icon-btn {
   background: transparent;
   border: none;
-  color: var(--fg-primary);
-  padding: 4px 8px;
+  color: var(--fg-muted);
+  width: 26px;
+  height: 24px;
+  border-radius: 5px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s ease;
+  padding: 0;
+}
+
+.ann-action-icon-btn:hover {
+  background: var(--bg-hover);
+  color: var(--accent-color);
+}
+
+.ann-action-icon-btn.active {
+  background: var(--bg-card-active);
+  color: var(--accent-color);
+}
+
+.ann-action-icon-btn svg,
+.ann-mode-btn svg {
+  pointer-events: none;
+}
+
+/* Row 3: Translation Card (Figure 2) */
+.translation-card {
+  border-top: 1px solid var(--border-color);
+  margin-top: 3px;
+  padding-top: 5px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  position: relative;
+}
+
+.phonetics-row {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.phonetic-pill {
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
   border-radius: 4px;
+  color: var(--fg-primary);
   font-size: 11px;
+  padding: 2px 7px;
   cursor: pointer;
   display: flex;
   align-items: center;
   gap: 4px;
+  transition: all 0.15s ease;
 }
 
-.selection-btn:hover {
-  background: var(--bg-card-active);
+[data-theme="light"] .phonetic-pill {
+  background: #f8f9fa;
+  border-color: #e5e7eb;
+}
+
+.phonetic-pill:hover {
+  border-color: var(--accent-color);
   color: var(--accent-color);
+}
+
+.sound-icon {
+  font-size: 10px;
+}
+
+.translation-body {
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--fg-primary);
+  max-height: 140px;
+  overflow-y: auto;
+  padding-right: 4px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.card-resize-grip {
+  position: absolute;
+  bottom: -2px;
+  right: -2px;
+  width: 8px;
+  height: 8px;
+  background: linear-gradient(135deg, transparent 50%, var(--border-color) 50%);
+  pointer-events: none;
+  opacity: 0.6;
+}
+
+/* Highlight Layer on PDF Canvas */
+.pdf-highlight-layer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 1;
+}
+
+.pdf-annotation-mark {
+  position: absolute;
+  pointer-events: auto;
+  cursor: pointer;
+  transition: opacity 0.1s ease;
+}
+
+.pdf-annotation-mark.mode-highlight {
+  opacity: 0.38;
+  mix-blend-mode: multiply;
+  border-radius: 2px;
+}
+
+.pdf-container.filter-dark .pdf-annotation-mark.mode-highlight,
+.pdf-container.filter-invert .pdf-annotation-mark.mode-highlight {
+  mix-blend-mode: screen;
+  opacity: 0.55;
+}
+
+.pdf-annotation-mark.mode-underline {
+  background: transparent !important;
+  border-bottom-width: 2.5px;
+  border-bottom-style: solid;
+}
+
+.pdf-annotation-mark:hover {
+  opacity: 0.65;
 }
 
 /* Toast */
@@ -512,4 +957,317 @@ body {
 .empty-icon {
   font-size: 44px;
   opacity: 0.6;
+}
+
+/* PDF Reading Comfort Filters */
+.pdf-container.filter-sepia .pdf-canvas {
+  filter: sepia(0.38) contrast(0.96) brightness(0.98);
+}
+.pdf-container.filter-sepia .pdf-page-wrapper {
+  background: #fbf5e8 !important;
+}
+.pdf-container.filter-dark .pdf-canvas {
+  filter: invert(0.92) hue-rotate(180deg) contrast(0.92);
+}
+.pdf-container.filter-dark .pdf-page-wrapper {
+  background: #181825 !important;
+}
+
+/* Settings Modal */
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  background: rgba(0, 0, 0, 0.65);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10000;
+  animation: modalFadeIn 0.15s ease-out;
+}
+
+.modal-dialog {
+  width: 520px;
+  max-width: 92vw;
+  max-height: 85vh;
+  background: var(--modal-bg);
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.55);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  animation: modalScale 0.15s ease-out;
+}
+
+@keyframes modalFadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes modalScale {
+  from { transform: scale(0.96); opacity: 0; }
+  to { transform: scale(1); opacity: 1; }
+}
+
+.modal-header {
+  padding: 12px 18px;
+  border-bottom: 1px solid var(--border-color);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  user-select: none;
+  background: var(--bg-secondary);
+}
+
+.modal-title {
+  font-size: 13.5px;
+  font-weight: 700;
+  color: var(--fg-primary);
+}
+
+.modal-body {
+  display: flex;
+  flex: 1;
+  min-height: 320px;
+  overflow: hidden;
+}
+
+.settings-nav {
+  width: 110px;
+  border-right: 1px solid var(--border-color);
+  background: var(--bg-secondary);
+  padding: 10px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  user-select: none;
+  flex-shrink: 0;
+}
+
+.settings-nav-item {
+  text-align: left;
+  padding: 8px 10px;
+  border-radius: 6px;
+  border: none;
+  background: transparent;
+  color: var(--fg-muted);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.12s ease;
+}
+
+.settings-nav-item:hover {
+  background: var(--bg-card);
+  color: var(--fg-primary);
+}
+
+.settings-nav-item.active {
+  background: var(--bg-card-active);
+  color: var(--accent-color);
+  font-weight: 600;
+}
+
+.settings-content {
+  flex: 1;
+  padding: 16px 18px;
+  overflow-y: auto;
+  background: var(--bg-primary);
+}
+
+.tab-pane {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.setting-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.setting-group-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.setting-label {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--fg-primary);
+  user-select: none;
+}
+
+.setting-options-row {
+  display: flex;
+  gap: 8px;
+}
+
+.setting-radio-card {
+  flex: 1;
+  padding: 8px 12px;
+  border: 1px solid var(--border-color);
+  background: var(--bg-secondary);
+  border-radius: 6px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  font-size: 11.5px;
+  color: var(--fg-muted);
+  transition: all 0.15s ease;
+  user-select: none;
+  position: relative;
+  text-align: center;
+}
+
+.setting-radio-card:hover {
+  border-color: var(--accent-color);
+  color: var(--fg-primary);
+}
+
+.setting-radio-card svg {
+  flex-shrink: 0;
+  color: var(--fg-muted);
+  transition: color 0.15s ease;
+}
+
+.setting-radio-card:hover svg {
+  color: var(--fg-primary);
+}
+
+/* Hide native radio button: no white dot / check circle */
+.setting-radio-card input[type="radio"] {
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
+  margin: 0;
+  pointer-events: none;
+}
+
+/* Selected state: border turns into accent color */
+.setting-radio-card:has(input[type="radio"]:checked),
+.setting-radio-card.active {
+  border-color: var(--accent-color);
+  box-shadow: 0 0 0 1px var(--accent-color);
+  color: var(--accent-color);
+  font-weight: 500;
+  background: var(--bg-hover);
+}
+
+.setting-radio-card:has(input[type="radio"]:checked) span,
+.setting-radio-card.active span {
+  color: var(--accent-color);
+  font-weight: 500;
+}
+
+.setting-radio-card:has(input[type="radio"]:checked) svg,
+.setting-radio-card.active svg {
+  color: var(--accent-color);
+}
+
+.setting-color-row {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  padding: 2px 0;
+}
+
+.color-dot {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.color-dot:hover {
+  transform: scale(1.15);
+}
+
+.color-dot.active {
+  border-color: #ffffff;
+  box-shadow: 0 0 0 2px var(--accent-color);
+}
+
+.setting-input {
+  width: 100%;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  padding: 6px 10px;
+  color: var(--fg-primary);
+  font-size: 11.5px;
+  font-family: inherit;
+  outline: none;
+  box-sizing: border-box;
+  transition: border-color 0.15s ease;
+}
+
+.setting-input:focus {
+  border-color: var(--accent-color);
+}
+
+.setting-textarea {
+  width: 100%;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  padding: 8px 10px;
+  color: var(--fg-primary);
+  font-size: 11.5px;
+  line-height: 1.5;
+  font-family: inherit;
+  resize: vertical;
+  outline: none;
+  box-sizing: border-box;
+}
+
+.setting-textarea:focus {
+  border-color: var(--accent-color);
+}
+
+.setting-hint {
+  font-size: 10.5px;
+  color: var(--fg-subtle);
+  line-height: 1.4;
+}
+
+.setting-hint code {
+  background: var(--bg-secondary);
+  padding: 1px 4px;
+  border-radius: 3px;
+  color: var(--accent-color);
+}
+
+.btn-text {
+  background: transparent;
+  border: none;
+  color: var(--accent-color);
+  font-size: 11px;
+  cursor: pointer;
+  padding: 0;
+}
+
+.btn-text:hover {
+  text-decoration: underline;
+}
+
+.modal-footer {
+  padding: 10px 18px;
+  border-top: 1px solid var(--border-color);
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  background: var(--bg-secondary);
 }

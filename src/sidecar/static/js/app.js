@@ -4,11 +4,69 @@ if (pdfjsLib) {
   pdfjsLib.GlobalWorkerOptions.workerSrc = '/static/vendor/pdfjs/pdf.worker.min.js';
 }
 
+const DEFAULT_SETTINGS = {
+  theme: 'dark', // 'dark' | 'light'
+  accentColor: '#89b4fa',
+  pdfFilter: 'normal', // 'normal' | 'sepia' | 'dark'
+  fullTextPrompt: '请帮我深入分析论文《{title}》的核心贡献、解决的主要问题、以及实验对比结论。',
+  selectionPrompt: '关于论文《{title}》，请解析我选中的以下内容：\n\n> "{selected_text}"\n\n请详细推导其中的原理、公式或学术背景。',
+  transEngine: 'builtin', // 'builtin' | 'custom'
+  transApiBase: 'https://api.deepseek.com/v1',
+  transApiKey: '',
+  transModel: 'deepseek-chat',
+  transPrompt: '你是一位资深学术审稿专家，请将用户提供的学术英文文本翻译为地道、准确的学术中文，保留专业术语，直接输出翻译结果，不要输出任何多余解释。',
+};
+
+function loadSettings() {
+  try {
+    const saved = localStorage.getItem('zotero_ag_settings');
+    if (saved) {
+      return Object.assign({}, DEFAULT_SETTINGS, JSON.parse(saved));
+    }
+  } catch (e) {}
+  return Object.assign({}, DEFAULT_SETTINGS);
+}
+
+function saveSettings(newSettings) {
+  state.settings = Object.assign({}, state.settings, newSettings);
+  try {
+    localStorage.setItem('zotero_ag_settings', JSON.stringify(state.settings));
+  } catch (e) {}
+  applySettings();
+}
+
+function applySettings() {
+  const s = state.settings || DEFAULT_SETTINGS;
+  // 1. Theme
+  if (s.theme === 'light') {
+    document.documentElement.setAttribute('data-theme', 'light');
+  } else {
+    document.documentElement.removeAttribute('data-theme');
+  }
+
+  // 2. Accent Color
+  if (s.accentColor) {
+    document.documentElement.style.setProperty('--accent-color', s.accentColor);
+  }
+
+  // 3. PDF Reading Filter
+  if (pdfContainerEl) {
+    pdfContainerEl.classList.remove('filter-sepia', 'filter-dark');
+    if (s.pdfFilter === 'sepia') {
+      pdfContainerEl.classList.add('filter-sepia');
+    } else if (s.pdfFilter === 'dark') {
+      pdfContainerEl.classList.add('filter-dark');
+    }
+  }
+}
+
 const state = {
   collections: [],
   selectedCollectionKey: null,
   items: [],
   selectedItem: null,
+  sortBy: 'date_desc',
+  settings: loadSettings(),
   currentPdfDoc: null,
   currentPageNum: 1,
   totalPdfPages: 0,
@@ -16,6 +74,11 @@ const state = {
   renderedPages: new Set(),
   renderingPages: new Set(),
   selectedText: '',
+  selectedRange: null,
+  annotationMode: 'highlight', // 'highlight' | 'underline'
+  annotations: [],
+  activeAnnotation: null,
+  isTranslationOpen: false,
   observer: null,
   firstPageWidth: null,
 };
@@ -23,8 +86,13 @@ const state = {
 // DOM Elements
 const collectionsListEl = document.getElementById('collectionsList');
 const itemsListEl = document.getElementById('itemsList');
+const itemsHeaderRowEl = document.getElementById('itemsHeaderRow');
 const itemsSectionHeaderEl = document.getElementById('itemsSectionHeader');
+const sortDateBtnEl = document.getElementById('sortDateBtn');
 const searchInputEl = document.getElementById('searchInput');
+
+const ICON_DATE_DESC = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m3 16 4 4 4-4"/><path d="M7 20V4"/><path d="M11 4h10"/><path d="M11 8h7"/><path d="M11 12h4"/></svg>`;
+const ICON_DATE_ASC = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m3 8 4-4 4 4"/><path d="M7 4v16"/><path d="M11 12h4"/><path d="M11 8h7"/><path d="M11 4h10"/></svg>`;
 const emptyStateEl = document.getElementById('emptyState');
 const paperViewerEl = document.getElementById('paperViewer');
 const paperTitleEl = document.getElementById('paperTitle');
@@ -38,6 +106,7 @@ const statusBadgeEl = document.getElementById('statusBadge');
 
 document.addEventListener('DOMContentLoaded', async () => {
   setupEventListeners();
+  applySettings();
   await checkHealth();
   // Initially only load collections! Empty main area by default.
   await loadCollections();
@@ -51,17 +120,36 @@ function setupEventListeners() {
     debounceTimer = setTimeout(() => {
       const q = e.target.value.trim();
       if (q) {
-        itemsSectionHeaderEl.style.display = 'block';
-        itemsSectionHeaderEl.textContent = `搜索结果: "${q}"`;
+        if (itemsHeaderRowEl) itemsHeaderRowEl.style.display = 'flex';
+        itemsSectionHeaderEl.textContent = `搜索: "${q}"`;
         loadItems(q);
       } else if (state.selectedCollectionKey) {
         loadItems();
       } else {
         itemsListEl.innerHTML = '';
-        itemsSectionHeaderEl.style.display = 'none';
+        if (itemsHeaderRowEl) itemsHeaderRowEl.style.display = 'none';
       }
     }, 300);
   });
+
+  // Toggle Date Sort (Newest <-> Oldest)
+  if (sortDateBtnEl) {
+    sortDateBtnEl.addEventListener('click', () => {
+      if (state.sortBy === 'date_desc') {
+        state.sortBy = 'date_asc';
+        sortDateBtnEl.innerHTML = ICON_DATE_ASC;
+      } else {
+        state.sortBy = 'date_desc';
+        sortDateBtnEl.innerHTML = ICON_DATE_DESC;
+      }
+      // Instant in-memory re-sort and render
+      sortItemsLocally();
+      renderItems();
+
+      const q = searchInputEl.value.trim();
+      loadItems(q);
+    });
+  }
 
   // Prev / Next Page Jump
   document.getElementById('prevPageBtn').addEventListener('click', () => {
@@ -92,7 +180,21 @@ function setupEventListeners() {
   // Action Buttons
   document.getElementById('askAgentBtn').addEventListener('click', () => {
     if (!state.selectedItem) return;
-    const prompt = `请帮我深入分析论文《${state.selectedItem.title || 'Untitled'}》的核心贡献、解决的主要问题、以及实验对比结论。`;
+    const it = state.selectedItem;
+    const title = it.title || '（无标题）';
+    const authors = (it.creators || []).join(', ') || (it.itemType === 'attachment' ? 'PDF 独立文档' : '未知作者');
+    const year = (it.date || '').substring(0, 4) || '';
+
+    let template = (state.settings && state.settings.fullTextPrompt) || DEFAULT_SETTINGS.fullTextPrompt;
+    if (it.itemType === 'attachment' && (!state.settings || !state.settings.fullTextPrompt)) {
+      template = '请帮我深入分析文档《{title}》的核心内容、要点与关键细节。';
+    }
+
+    const prompt = template
+      .replaceAll('{title}', title)
+      .replaceAll('{authors}', authors)
+      .replaceAll('{year}', year);
+
     copyToClipboard(prompt, '已复制分析 Prompt！请直接粘贴至 Antigravity 对话框 🚀');
   });
 
@@ -100,7 +202,12 @@ function setupEventListeners() {
     if (!state.selectedItem) return;
     const it = state.selectedItem;
     const citeKey = it.itemKey;
-    const bibtex = `@article{${citeKey},\n  title={${it.title || ''}},\n  author={${(it.creators || []).join(' and ')}},\n  year={${it.date || ''}},\n  doi={${it.DOI || ''}}\n}`;
+    const isAttachment = it.itemType === 'attachment';
+    const year = (it.date || '').substring(0, 4) || '';
+    const doi = it.doi || it.DOI || '';
+    const bibtex = isAttachment
+      ? `@misc{${citeKey},\n  title={${it.title || ''}}\n}`
+      : `@article{${citeKey},\n  title={${it.title || ''}},\n  author={${(it.creators || []).join(' and ')}},\n  year={${year}},\n  doi={${doi}}\n}`;
     copyToClipboard(bibtex, '已复制 BibTeX 条目到剪贴板！');
   });
 
@@ -121,17 +228,87 @@ function setupEventListeners() {
     }
   });
 
-  // Text Selection Tooltip on PDF text
+  // Text Selection Tooltip & Zotero Selection Shield
+  initTextSelectionShield();
   document.addEventListener('mouseup', handleTextSelection);
 
+  // 1. Zotero 8-color marking swatches
+  document.querySelectorAll('.ann-color-btn').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const color = btn.dataset.color;
+      applyAnnotation(color, state.annotationMode);
+    });
+  });
+
+  // Clear / Eraser Button
+  const clearAnnotationBtn = document.getElementById('clearAnnotationBtn');
+  if (clearAnnotationBtn) {
+    clearAnnotationBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      clearCurrentAnnotation();
+    });
+  }
+
+  // 2. Mode Toggle: Highlight [A] vs Underline [A_]
+  const modeHighlightBtn = document.getElementById('modeHighlightBtn');
+  const modeUnderlineBtn = document.getElementById('modeUnderlineBtn');
+  if (modeHighlightBtn && modeUnderlineBtn) {
+    modeHighlightBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      state.annotationMode = 'highlight';
+      modeHighlightBtn.classList.add('active');
+      modeUnderlineBtn.classList.remove('active');
+    });
+    modeUnderlineBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      state.annotationMode = 'underline';
+      modeUnderlineBtn.classList.add('active');
+      modeHighlightBtn.classList.remove('active');
+    });
+  }
+
+  // 3. Translation Toggle & Card
+  const tooltipTranslateBtn = document.getElementById('tooltipTranslateBtn');
+  if (tooltipTranslateBtn) {
+    tooltipTranslateBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      toggleTranslation();
+    });
+  }
+
+  // Sound pronunciation buttons
+  const speakUsBtn = document.getElementById('speakUsBtn');
+  const speakUkBtn = document.getElementById('speakUkBtn');
+  if (speakUsBtn) {
+    speakUsBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      speakCurrentWord('en-US');
+    });
+  }
+  if (speakUkBtn) {
+    speakUkBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      speakCurrentWord('en-GB');
+    });
+  }
+
+  // 4. Ask Agent Vector Button
   document.getElementById('tooltipAskBtn').addEventListener('click', () => {
     if (!state.selectedText) return;
     const it = state.selectedItem;
-    const prompt = `关于论文《${it ? it.title : ''}》，请解析我选中的以下内容：\n\n> "${state.selectedText}"\n\n请详细推导其中的原理、公式或学术背景。`;
+    const title = it ? (it.title || '（无标题）') : '选中文档';
+    const template = (state.settings && state.settings.selectionPrompt) || DEFAULT_SETTINGS.selectionPrompt;
+
+    const prompt = template
+      .replaceAll('{title}', title)
+      .replaceAll('{selected_text}', state.selectedText);
+
     copyToClipboard(prompt, '已生成提问 Prompt 并复制到剪贴板！请直接粘贴提问。');
     hideSelectionTooltip();
   });
 
+  // 5. Quote Vector Button
   document.getElementById('tooltipCopyBtn').addEventListener('click', () => {
     if (!state.selectedText) return;
     const quote = `> "${state.selectedText}" ([@${state.selectedItem?.itemKey || 'Zotero'}])`;
@@ -144,6 +321,232 @@ function setupEventListeners() {
     document.getElementById('sidebar').classList.toggle('collapsed');
     setTimeout(fitWidth, 250);
   });
+
+  // Settings Modal Controls
+  const settingsBtn = document.getElementById('settingsBtn');
+  const settingsModal = document.getElementById('settingsModal');
+  const closeSettingsBtn = document.getElementById('closeSettingsBtn');
+  const cancelSettingsBtn = document.getElementById('cancelSettingsBtn');
+  const saveSettingsBtn = document.getElementById('saveSettingsBtn');
+  const fullTextPromptInput = document.getElementById('fullTextPromptInput');
+  const selectionPromptInput = document.getElementById('selectionPromptInput');
+  const resetFullPromptBtn = document.getElementById('resetFullPromptBtn');
+  const resetSelectionPromptBtn = document.getElementById('resetSelectionPromptBtn');
+
+  // Translation Settings inputs
+  const transApiBaseInput = document.getElementById('transApiBaseInput');
+  const transApiKeyInput = document.getElementById('transApiKeyInput');
+  const transModelInput = document.getElementById('transModelInput');
+  const transPromptInput = document.getElementById('transPromptInput');
+  const resetTransPromptBtn = document.getElementById('resetTransPromptBtn');
+  const testTransApiBtn = document.getElementById('testTransApiBtn');
+  const testApiStatus = document.getElementById('testApiStatus');
+
+  // Tab switching in settings
+  document.querySelectorAll('.settings-nav-item').forEach((tabBtn) => {
+    tabBtn.addEventListener('click', () => {
+      document.querySelectorAll('.settings-nav-item').forEach(b => b.classList.remove('active'));
+      tabBtn.classList.add('active');
+      const targetTab = tabBtn.dataset.tab;
+      const tabApp = document.getElementById('tabAppearance');
+      const tabPr = document.getElementById('tabPrompts');
+      const tabTr = document.getElementById('tabTranslation');
+      if (tabApp) tabApp.style.display = targetTab === 'appearance' ? 'flex' : 'none';
+      if (tabPr) tabPr.style.display = targetTab === 'prompts' ? 'flex' : 'none';
+      if (tabTr) tabTr.style.display = targetTab === 'translation' ? 'flex' : 'none';
+    });
+  });
+
+  // Color picker dots
+  document.querySelectorAll('.color-dot').forEach((dot) => {
+    dot.addEventListener('click', () => {
+      document.querySelectorAll('.color-dot').forEach(d => d.classList.remove('active'));
+      dot.classList.add('active');
+      // Live preview accent color on cards and UI
+      if (dot.dataset.color) {
+        document.documentElement.style.setProperty('--accent-color', dot.dataset.color);
+      }
+    });
+  });
+
+  // Radio cards state helper
+  function updateRadioCards(name) {
+    document.querySelectorAll(`input[name="${name}"]`).forEach(input => {
+      const card = input.closest('.setting-radio-card');
+      if (card) {
+        if (input.checked) {
+          card.classList.add('active');
+        } else {
+          card.classList.remove('active');
+        }
+      }
+    });
+  }
+
+  document.querySelectorAll('input[name="themeMode"], input[name="pdfFilter"], input[name="transEngine"]').forEach(input => {
+    input.addEventListener('change', () => {
+      updateRadioCards(input.name);
+      if (input.name === 'transEngine') {
+        const customAiGroup = document.getElementById('customAiModelGroup');
+        if (customAiGroup) {
+          customAiGroup.style.display = (input.value === 'custom') ? 'flex' : 'none';
+        }
+      }
+    });
+  });
+
+  function openSettings() {
+    const s = state.settings || DEFAULT_SETTINGS;
+    // Set theme radio
+    const themeRadio = document.querySelector(`input[name="themeMode"][value="${s.theme}"]`);
+    if (themeRadio) {
+      themeRadio.checked = true;
+      updateRadioCards('themeMode');
+    }
+
+    // Set accent color active dot
+    document.querySelectorAll('.color-dot').forEach(dot => {
+      if (dot.dataset.color.toLowerCase() === (s.accentColor || '#89b4fa').toLowerCase()) {
+        dot.classList.add('active');
+      } else {
+        dot.classList.remove('active');
+      }
+    });
+
+    // Set PDF filter radio
+    const filterRadio = document.querySelector(`input[name="pdfFilter"][value="${s.pdfFilter}"]`);
+    if (filterRadio) {
+      filterRadio.checked = true;
+      updateRadioCards('pdfFilter');
+    }
+
+    // Set prompt templates
+    if (fullTextPromptInput) fullTextPromptInput.value = s.fullTextPrompt || DEFAULT_SETTINGS.fullTextPrompt;
+    if (selectionPromptInput) selectionPromptInput.value = s.selectionPrompt || DEFAULT_SETTINGS.selectionPrompt;
+
+    // Set translation settings
+    const engineRadio = document.querySelector(`input[name="transEngine"][value="${s.transEngine || 'builtin'}"]`);
+    if (engineRadio) {
+      engineRadio.checked = true;
+      updateRadioCards('transEngine');
+    }
+    const customAiGroup = document.getElementById('customAiModelGroup');
+    if (customAiGroup) {
+      customAiGroup.style.display = (s.transEngine === 'custom') ? 'flex' : 'none';
+    }
+
+    if (transApiBaseInput) transApiBaseInput.value = s.transApiBase || DEFAULT_SETTINGS.transApiBase;
+    if (transApiKeyInput) transApiKeyInput.value = s.transApiKey || '';
+    if (transModelInput) transModelInput.value = s.transModel || DEFAULT_SETTINGS.transModel;
+    if (transPromptInput) transPromptInput.value = s.transPrompt || DEFAULT_SETTINGS.transPrompt;
+    if (testApiStatus) testApiStatus.textContent = '';
+
+    if (settingsModal) settingsModal.style.display = 'flex';
+  }
+
+  function closeSettings() {
+    if (settingsModal) settingsModal.style.display = 'none';
+    // Revert un-saved preview if any
+    applySettings();
+  }
+
+  if (settingsBtn) settingsBtn.addEventListener('click', openSettings);
+  if (closeSettingsBtn) closeSettingsBtn.addEventListener('click', closeSettings);
+  if (cancelSettingsBtn) cancelSettingsBtn.addEventListener('click', closeSettings);
+
+  // Close modal when clicking outside dialog
+  if (settingsModal) {
+    settingsModal.addEventListener('click', (e) => {
+      if (e.target === settingsModal) closeSettings();
+    });
+  }
+
+  // Escape key to close
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && settingsModal && settingsModal.style.display === 'flex') {
+      closeSettings();
+    }
+  });
+
+  // Reset prompt buttons
+  if (resetFullPromptBtn) {
+    resetFullPromptBtn.addEventListener('click', () => {
+      if (fullTextPromptInput) fullTextPromptInput.value = DEFAULT_SETTINGS.fullTextPrompt;
+    });
+  }
+  if (resetSelectionPromptBtn) {
+    resetSelectionPromptBtn.addEventListener('click', () => {
+      if (selectionPromptInput) selectionPromptInput.value = DEFAULT_SETTINGS.selectionPrompt;
+    });
+  }
+  if (resetTransPromptBtn) {
+    resetTransPromptBtn.addEventListener('click', () => {
+      if (transPromptInput) transPromptInput.value = DEFAULT_SETTINGS.transPrompt;
+    });
+  }
+
+  // Test AI Model Connection
+  if (testTransApiBtn) {
+    testTransApiBtn.addEventListener('click', async () => {
+      const apiKey = transApiKeyInput ? transApiKeyInput.value.trim() : '';
+      const apiBase = transApiBaseInput ? transApiBaseInput.value.trim() : '';
+      const model = transModelInput ? transModelInput.value.trim() : '';
+      if (!apiKey) {
+        if (testApiStatus) testApiStatus.textContent = '❌ 请先输入 API Key';
+        return;
+      }
+      if (testApiStatus) testApiStatus.textContent = '⏳ 正在测试模型连接...';
+      try {
+        const res = await fetch('/api/test_ai_model', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ api_base: apiBase, api_key: apiKey, model: model }),
+        });
+        const data = await res.json();
+        if (data.success) {
+          if (testApiStatus) testApiStatus.textContent = `✅ 连接成功 (${data.model || 'OK'})`;
+        } else {
+          if (testApiStatus) testApiStatus.textContent = `❌ 失败: ${data.error || '错误'}`;
+        }
+      } catch (err) {
+        if (testApiStatus) testApiStatus.textContent = `❌ 连接异常: ${err.message}`;
+      }
+    });
+  }
+
+  // Save Settings
+  if (saveSettingsBtn) {
+    saveSettingsBtn.addEventListener('click', () => {
+      const selectedTheme = document.querySelector('input[name="themeMode"]:checked')?.value || 'dark';
+      const activeColorDot = document.querySelector('.color-dot.active');
+      const selectedColor = activeColorDot ? activeColorDot.dataset.color : '#89b4fa';
+      const selectedFilter = document.querySelector('input[name="pdfFilter"]:checked')?.value || 'normal';
+      const fullPrompt = (fullTextPromptInput ? fullTextPromptInput.value.trim() : '') || DEFAULT_SETTINGS.fullTextPrompt;
+      const selectPrompt = (selectionPromptInput ? selectionPromptInput.value.trim() : '') || DEFAULT_SETTINGS.selectionPrompt;
+
+      const selectedEngine = document.querySelector('input[name="transEngine"]:checked')?.value || 'builtin';
+      const apiBase = (transApiBaseInput ? transApiBaseInput.value.trim() : '') || DEFAULT_SETTINGS.transApiBase;
+      const apiKey = transApiKeyInput ? transApiKeyInput.value.trim() : '';
+      const model = (transModelInput ? transModelInput.value.trim() : '') || DEFAULT_SETTINGS.transModel;
+      const transPrompt = (transPromptInput ? transPromptInput.value.trim() : '') || DEFAULT_SETTINGS.transPrompt;
+
+      saveSettings({
+        theme: selectedTheme,
+        accentColor: selectedColor,
+        pdfFilter: selectedFilter,
+        fullTextPrompt: fullPrompt,
+        selectionPrompt: selectPrompt,
+        transEngine: selectedEngine,
+        transApiBase: apiBase,
+        transApiKey: apiKey,
+        transModel: model,
+        transPrompt: transPrompt,
+      });
+
+      closeSettings();
+      showToast('设置已保存并即时生效 ✨');
+    });
+  }
 
   // Auto-fit PDF on window/pane resize
   let resizeTimer;
@@ -224,14 +627,39 @@ function renderCollections() {
 window.selectCollection = (key, name) => {
   state.selectedCollectionKey = key;
   renderCollections();
-  itemsSectionHeaderEl.style.display = 'block';
+  if (itemsHeaderRowEl) itemsHeaderRowEl.style.display = 'flex';
   itemsSectionHeaderEl.textContent = name ? `目录: ${name}` : '全部文献';
   loadItems();
 };
 
+function sortItemsLocally() {
+  if (!state.items || state.items.length <= 1) return;
+
+  state.items.sort((a, b) => {
+    const dateA = (a.date || '').trim();
+    const dateB = (b.date || '').trim();
+
+    // If both have no publication date, fallback to modified date
+    if (!dateA && !dateB) {
+      const modA = (a.dateModified || '').trim();
+      const modB = (b.dateModified || '').trim();
+      return state.sortBy === 'date_asc' ? modA.localeCompare(modB) : modB.localeCompare(modA);
+    }
+    // Items without publication date always go to bottom
+    if (!dateA) return 1;
+    if (!dateB) return -1;
+
+    if (state.sortBy === 'date_asc') {
+      return dateA.localeCompare(dateB);
+    } else {
+      return dateB.localeCompare(dateA);
+    }
+  });
+}
+
 async function loadItems(query = '') {
   try {
-    let url = `/api/items?limit=50`;
+    let url = `/api/items?limit=100&sort=${encodeURIComponent(state.sortBy)}`;
     if (state.selectedCollectionKey) {
       url += `&collection_key=${encodeURIComponent(state.selectedCollectionKey)}`;
     }
@@ -242,6 +670,7 @@ async function loadItems(query = '') {
     const res = await fetch(url);
     const data = await res.json();
     state.items = data.items || [];
+    sortItemsLocally();
     renderItems();
   } catch (e) {
     console.error('Failed to load items:', e);
@@ -262,7 +691,10 @@ function renderItems() {
     div.onclick = () => selectItem(item);
 
     const title = escapeHtml(item.title || '（无标题）');
-    const authors = escapeHtml((item.creators || []).slice(0, 3).join(', ') || '未知作者');
+    const isAttachment = item.itemType === 'attachment';
+    const authors = isAttachment
+      ? 'PDF 独立文档'
+      : escapeHtml((item.creators || []).slice(0, 3).join(', ') || '未知作者');
     const year = (item.date || '').substring(0, 4) || '';
     const hasPdf = item.hasPdf ? '<span class="badge-pdf">PDF</span>' : '';
 
@@ -290,10 +722,10 @@ window.selectItem = async (item) => {
     }
   } catch (e) {}
 
-  displaySelectedItem();
+  await displaySelectedItem();
 };
 
-function displaySelectedItem() {
+async function displaySelectedItem() {
   const item = state.selectedItem;
   if (!item) return;
 
@@ -301,13 +733,19 @@ function displaySelectedItem() {
   paperViewerEl.style.display = 'flex';
 
   paperTitleEl.textContent = item.title || '（无标题）';
-  const authors = (item.creators || []).join(', ') || '未知作者';
-  const year = (item.date || '').substring(0, 4) || '';
-  const pub = item.publicationTitle || '';
-  paperMetaEl.textContent = `${authors} ${year ? '· ' + year : ''} ${pub ? '· ' + pub : ''}`;
+  const isAttachment = item.itemType === 'attachment';
+  if (isAttachment) {
+    paperMetaEl.textContent = 'PDF 独立文档';
+  } else {
+    const authors = (item.creators || []).join(', ') || '未知作者';
+    const year = (item.date || '').substring(0, 4) || '';
+    const pub = item.publicationTitle || '';
+    paperMetaEl.textContent = `${authors} ${year ? '· ' + year : ''} ${pub ? '· ' + pub : ''}`;
+  }
 
   const pdfAttachments = item.pdfAttachments || [];
   if (pdfAttachments.length > 0) {
+    await loadAnnotations(item.itemKey);
     const attachKey = pdfAttachments[0].attachmentKey;
     loadPdfContinuous(`/api/pdf/${attachKey}`);
   } else {
@@ -366,17 +804,21 @@ async function loadPdfContinuous(pdfUrl) {
     zoomPercentEl.textContent = `${Math.round(state.scale * 100)}%`;
 
     // Build page placeholders for continuous scrolling
+    clearAllTextLayerShields();
+    applySettings();
     pdfContainerEl.innerHTML = '';
     for (let p = 1; p <= state.totalPdfPages; p++) {
       const pageWrapper = document.createElement('div');
       pageWrapper.id = `pdf-page-${p}`;
       pageWrapper.className = 'pdf-page-wrapper';
       pageWrapper.dataset.pageNum = String(p);
+      pageWrapper.style.setProperty('--scale-factor', String(state.scale));
       pageWrapper.style.width = `${unscaledViewport.width * state.scale}px`;
       pageWrapper.style.minHeight = `${unscaledViewport.height * state.scale}px`;
 
       pageWrapper.innerHTML = `
         <canvas id="canvas-page-${p}" class="pdf-canvas"></canvas>
+        <div id="highlightlayer-page-${p}" class="pdf-highlight-layer"></div>
         <div id="textlayer-page-${p}" class="textLayer"></div>
       `;
       pdfContainerEl.appendChild(pageWrapper);
@@ -394,6 +836,144 @@ async function loadPdfContinuous(pdfUrl) {
     console.error('Failed to load PDF:', e);
     pdfContainerEl.innerHTML = `<div class="empty-state"><p>加载 PDF 出错: ${escapeHtml(e.message)}</p></div>`;
   }
+}
+
+// ==========================================
+// Zotero-grade Dynamic Text Selection Shield (endOfContent)
+// Prevents selection runaway / overshoot across paragraphs & columns in Chromium
+// ==========================================
+const activeTextLayersMap = new Map(); // textLayerElement -> endOfContentElement
+let isPointerSelecting = false;
+let prevSelectionRange = null;
+
+function registerTextLayerShield(textLayerEl, endOfContentEl) {
+  if (!textLayerEl || !endOfContentEl) return;
+  activeTextLayersMap.set(textLayerEl, endOfContentEl);
+}
+
+function unregisterTextLayerShield(textLayerEl) {
+  if (!textLayerEl) return;
+  activeTextLayersMap.delete(textLayerEl);
+}
+
+function clearAllTextLayerShields() {
+  activeTextLayersMap.clear();
+  prevSelectionRange = null;
+}
+
+function resetTextLayerShield(endDiv, textLayerDiv) {
+  if (!textLayerDiv || !endDiv) return;
+  textLayerDiv.appendChild(endDiv);
+  endDiv.style.width = '';
+  endDiv.style.height = '';
+  endDiv.style.userSelect = '';
+  textLayerDiv.classList.remove('selecting');
+}
+
+function resetAllTextLayerShields() {
+  for (const [textLayerDiv, endDiv] of activeTextLayersMap) {
+    resetTextLayerShield(endDiv, textLayerDiv);
+  }
+}
+
+function initTextSelectionShield() {
+  document.addEventListener('pointerdown', (e) => {
+    if (selectionTooltipEl && selectionTooltipEl.contains(e.target)) return;
+    isPointerSelecting = true;
+    const tl = e.target.closest ? e.target.closest('.textLayer') : null;
+    if (tl) {
+      tl.classList.add('selecting');
+    }
+  });
+
+  const onPointerEnd = () => {
+    isPointerSelecting = false;
+    resetAllTextLayerShields();
+  };
+
+  document.addEventListener('pointerup', onPointerEnd);
+  window.addEventListener('blur', onPointerEnd);
+  document.addEventListener('keyup', () => {
+    if (!isPointerSelecting) {
+      resetAllTextLayerShields();
+    }
+  });
+
+  document.addEventListener('selectionchange', () => {
+    const selection = document.getSelection();
+    if (!selection || selection.rangeCount === 0) {
+      resetAllTextLayerShields();
+      prevSelectionRange = null;
+      return;
+    }
+
+    const activeLayers = new Set();
+    for (let i = 0; i < selection.rangeCount; i++) {
+      const range = selection.getRangeAt(i);
+      for (const textLayerDiv of activeTextLayersMap.keys()) {
+        if (!activeLayers.has(textLayerDiv) && range.intersectsNode(textLayerDiv)) {
+          activeLayers.add(textLayerDiv);
+        }
+      }
+    }
+
+    for (const [textLayerDiv, endDiv] of activeTextLayersMap) {
+      if (activeLayers.has(textLayerDiv)) {
+        textLayerDiv.classList.add('selecting');
+      } else {
+        resetTextLayerShield(endDiv, textLayerDiv);
+      }
+    }
+
+    if (activeLayers.size === 0) {
+      prevSelectionRange = null;
+      return;
+    }
+
+    const range = selection.getRangeAt(0);
+    const modifyStart = prevSelectionRange && (
+      range.compareBoundaryPoints(Range.END_TO_END, prevSelectionRange) === 0 ||
+      range.compareBoundaryPoints(Range.START_TO_END, prevSelectionRange) === 0
+    );
+
+    let anchor = modifyStart ? range.startContainer : range.endContainer;
+    if (anchor.nodeType === Node.TEXT_NODE) {
+      anchor = anchor.parentNode;
+    }
+    if (anchor.classList && anchor.classList.contains('highlight')) {
+      anchor = anchor.parentNode;
+    }
+
+    const parentTextLayer = (anchor.parentElement && anchor.parentElement.closest('.textLayer')) || (anchor.closest && anchor.closest('.textLayer'));
+    if (!parentTextLayer) return;
+
+    if (!modifyStart && range.endOffset === 0) {
+      let prev = anchor;
+      while (prev) {
+        while (prev && !prev.previousSibling && prev.parentNode && prev.parentNode !== parentTextLayer) {
+          prev = prev.parentNode;
+        }
+        if (prev && prev.previousSibling) {
+          prev = prev.previousSibling;
+          if (prev.childNodes && prev.childNodes.length > 0 && !prev.classList?.contains('endOfContent')) {
+            anchor = prev;
+            break;
+          }
+        } else {
+          break;
+        }
+      }
+    }
+
+    const endDiv = activeTextLayersMap.get(parentTextLayer);
+    if (endDiv && anchor && anchor.parentElement && anchor.parentElement === parentTextLayer) {
+      endDiv.style.width = parentTextLayer.style.width || '100%';
+      endDiv.style.height = parentTextLayer.style.height || '100%';
+      endDiv.style.userSelect = 'text';
+      anchor.parentElement.insertBefore(endDiv, modifyStart ? anchor : anchor.nextSibling);
+    }
+    prevSelectionRange = range.cloneRange();
+  });
 }
 
 function setupContinuousObserver() {
@@ -442,28 +1022,48 @@ async function renderPage(pageNum) {
 
     wrapper.style.width = `${viewport.width}px`;
     wrapper.style.minHeight = `${viewport.height}px`;
+    wrapper.style.setProperty('--scale-factor', String(state.scale));
+
+    // HiDPI / Retina Crisp Rendering: render at device pixel ratio
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width = Math.floor(viewport.width * dpr);
+    canvas.height = Math.floor(viewport.height * dpr);
+    canvas.style.width = `${viewport.width}px`;
+    canvas.style.height = `${viewport.height}px`;
 
     const context = canvas.getContext('2d');
-    canvas.height = viewport.height;
-    canvas.width = viewport.width;
-
-    await page.render({
+    const renderContext = {
       canvasContext: context,
       viewport: viewport,
-    }).promise;
+      transform: dpr !== 1 ? [dpr, 0, 0, dpr, 0, 0] : null,
+    };
 
-    // Render Text Layer
+    await page.render(renderContext).promise;
+
+    // Render Text Layer with exact scale-factor
+    unregisterTextLayerShield(textLayer);
     textLayer.innerHTML = '';
     textLayer.style.width = `${viewport.width}px`;
     textLayer.style.height = `${viewport.height}px`;
+    textLayer.style.setProperty('--scale-factor', String(state.scale));
 
     const textContent = await page.getTextContent();
-    pdfjsLib.renderTextLayer({
+    const textLayerTask = pdfjsLib.renderTextLayer({
       textContentSource: textContent,
       container: textLayer,
       viewport: viewport,
       textDivs: [],
     });
+    await textLayerTask.promise;
+
+    // Append Zotero selection shield endOfContent
+    const endOfContent = document.createElement('div');
+    endOfContent.className = 'endOfContent';
+    textLayer.appendChild(endOfContent);
+    registerTextLayerShield(textLayer, endOfContent);
+
+    // Render Highlights & Annotations Layer
+    renderAnnotationsForPage(pageNum, viewport);
 
     state.renderedPages.add(pageNum);
   } catch (err) {
@@ -481,10 +1081,19 @@ function reRenderPages() {
   for (let p = 1; p <= state.totalPdfPages; p++) {
     const wrapper = document.getElementById(`pdf-page-${p}`);
     if (wrapper) {
+      wrapper.style.setProperty('--scale-factor', String(state.scale));
+      if (state.firstPageWidth) {
+        wrapper.style.width = `${state.firstPageWidth * state.scale}px`;
+      }
       const canvas = document.getElementById(`canvas-page-${p}`);
       const textLayer = document.getElementById(`textlayer-page-${p}`);
+      const highlightLayer = document.getElementById(`highlightlayer-page-${p}`);
       if (canvas) canvas.getContext('2d')?.clearRect(0, 0, canvas.width, canvas.height);
-      if (textLayer) textLayer.innerHTML = '';
+      if (textLayer) {
+        unregisterTextLayerShield(textLayer);
+        textLayer.innerHTML = '';
+      }
+      if (highlightLayer) highlightLayer.innerHTML = '';
     }
   }
 
@@ -505,27 +1114,671 @@ function scrollToPage(pageNum) {
   }
 }
 
-// Text Selection & Action Tooltip
-function handleTextSelection() {
-  const selection = window.getSelection();
-  const text = selection ? selection.toString().trim() : '';
+// --- Annotations & Marking Logic ---
 
-  if (text.length > 3) {
-    state.selectedText = text;
+function showTooltipAtRect(rect) {
+  state.isTranslationOpen = false;
+  const tooltipTranslationCard = document.getElementById('tooltipTranslationCard');
+  const tooltipTranslateBtn = document.getElementById('tooltipTranslateBtn');
+  if (tooltipTranslationCard) tooltipTranslationCard.style.display = 'none';
+  if (tooltipTranslateBtn) tooltipTranslateBtn.classList.remove('active');
+
+  const tooltipWidth = 270;
+  const tooltipHeight = 72;
+  let left = rect.left + window.scrollX;
+  let top = rect.top + window.scrollY - tooltipHeight - 8;
+
+  if (left + tooltipWidth > window.innerWidth - 10) {
+    left = window.innerWidth - tooltipWidth - 10;
+  }
+  if (left < 10) left = 10;
+
+  if (top < window.scrollY + 10) {
+    top = (rect.bottom || rect.top) + window.scrollY + 8;
+  }
+
+  selectionTooltipEl.style.left = `${left}px`;
+  selectionTooltipEl.style.top = `${top}px`;
+  selectionTooltipEl.classList.add('show');
+}
+
+function rectsOverlap(r1, r2) {
+  const overlapX = Math.max(0, Math.min(r1.left + r1.width, r2.left + r2.width) - Math.max(r1.left, r2.left));
+  const overlapY = Math.max(0, Math.min(r1.top + r1.height, r2.top + r2.height) - Math.max(r1.top, r2.top));
+  const overlapArea = overlapX * overlapY;
+  const minArea = Math.min(r1.width * r1.height, r2.width * r2.height);
+  if (minArea <= 0) return false;
+  return (overlapArea / minArea > 0.25) || (overlapY > 6 && overlapX > 10);
+}
+
+function isAnnotationOverlapping(ann, pageNum, newRects, newText) {
+  const annPage = ann.pageNum !== undefined ? ann.pageNum : (ann.pageIndex !== undefined ? ann.pageIndex + 1 : 1);
+  if (annPage !== pageNum) return false;
+
+  // 1. Text overlap check
+  if (newText && ann.text) {
+    const t1 = ann.text.replace(/\s+/g, '').trim().toLowerCase();
+    const t2 = newText.replace(/\s+/g, '').trim().toLowerCase();
+    if (t1 && t2 && (t1 === t2 || t1.includes(t2) || t2.includes(t1))) {
+      return true;
+    }
+  }
+
+  // 2. Geometric overlap check
+  if (!ann.rects || !Array.isArray(ann.rects) || !newRects || !newRects.length) return false;
+  for (const r1 of newRects) {
+    for (const r2 of ann.rects) {
+      let rectObj = r2;
+      if (Array.isArray(r2) && r2.length >= 4) {
+        rectObj = {
+          left: Math.min(r2[0], r2[2]),
+          top: Math.min(r2[1], r2[3]),
+          width: Math.abs(r2[2] - r2[0]),
+          height: Math.abs(r2[3] - r2[1]),
+        };
+      }
+      if (rectsOverlap(r1, rectObj)) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+function saveAnnotationsToStorage(itemKey) {
+  if (!itemKey) return;
+  try {
+    const localOnly = state.annotations.filter(a => a.source !== 'zotero');
+    localStorage.setItem(`zotero_ag_annotations_${itemKey}`, JSON.stringify(localOnly));
+  } catch (e) {}
+}
+
+function deleteAnnotationOnServer(itemKey, annId) {
+  if (!itemKey || !annId) return;
+  fetch(`/api/annotations/${encodeURIComponent(itemKey)}/${encodeURIComponent(annId)}`, {
+    method: 'DELETE',
+  }).catch(() => {});
+}
+
+async function loadAnnotations(itemKey) {
+  if (!itemKey) return;
+  state.annotations = [];
+  try {
+    const res = await fetch(`/api/annotations/${encodeURIComponent(itemKey)}`);
+    const data = await res.json();
+    const zoteroAnns = data.zotero_annotations || [];
+    const localAnns = data.local_annotations || [];
+    let savedLocal = [];
+    try {
+      savedLocal = JSON.parse(localStorage.getItem(`zotero_ag_annotations_${itemKey}`) || '[]');
+    } catch (e) {}
+
+    const allMap = new Map();
+    zoteroAnns.forEach(a => allMap.set(a.id, a));
+    localAnns.forEach(a => allMap.set(a.id, a));
+    savedLocal.forEach(a => allMap.set(a.id, a));
+
+    // Deduplicate overlapping duplicate annotations (keeping latest, clean up historical stacks)
+    const rawList = Array.from(allMap.values());
+    const deduped = [];
+    for (const ann of rawList) {
+      const pageNum = ann.pageNum || (ann.pageIndex !== undefined ? ann.pageIndex + 1 : 1);
+      const isDupe = deduped.some((existing, idx) => {
+        const existPage = existing.pageNum || (existing.pageIndex !== undefined ? existing.pageIndex + 1 : 1);
+        if (existPage === pageNum && isAnnotationOverlapping(existing, pageNum, ann.rects || [], ann.text || '')) {
+          if ((ann.createdAt || 0) >= (existing.createdAt || 0)) {
+            deduped[idx] = ann;
+          }
+          return true;
+        }
+        return false;
+      });
+      if (!isDupe) {
+        deduped.push(ann);
+      }
+    }
+
+    state.annotations = deduped;
+    saveAnnotationsToStorage(itemKey);
+  } catch (e) {
+    console.warn('Failed to load annotations:', e);
+  }
+}
+
+function renderAnnotationsForPage(pageNum, viewport) {
+  const highlightLayer = document.getElementById(`highlightlayer-page-${pageNum}`);
+  if (!highlightLayer) return;
+  highlightLayer.innerHTML = '';
+
+  const pageIndex = pageNum - 1;
+  const pageAnns = state.annotations.filter(a => {
+    if (a.pageNum !== undefined) return a.pageNum === pageNum;
+    if (a.pageIndex !== undefined) return a.pageIndex === pageIndex;
+    return false;
+  });
+
+  pageAnns.forEach(ann => {
+    const mode = ann.mode || (ann.annotationType === 3 ? 'underline' : 'highlight');
+    const color = ann.color || '#ffd400';
+
+    function attachMarkEvents(mark) {
+      mark.dataset.annId = ann.id;
+      mark.addEventListener('click', (e) => {
+        e.stopPropagation();
+        e.preventDefault();
+        state.activeAnnotation = ann;
+        state.selectedText = ann.text || '';
+        state.selectedRange = null;
+
+        // Sync mode buttons
+        const modeHighlightBtn = document.getElementById('modeHighlightBtn');
+        const modeUnderlineBtn = document.getElementById('modeUnderlineBtn');
+        if (mode === 'underline') {
+          state.annotationMode = 'underline';
+          if (modeUnderlineBtn) modeUnderlineBtn.classList.add('active');
+          if (modeHighlightBtn) modeHighlightBtn.classList.remove('active');
+        } else {
+          state.annotationMode = 'highlight';
+          if (modeHighlightBtn) modeHighlightBtn.classList.add('active');
+          if (modeUnderlineBtn) modeUnderlineBtn.classList.remove('active');
+        }
+
+        const markRect = mark.getBoundingClientRect();
+        showTooltipAtRect(markRect);
+      });
+    }
+
+    if (ann.source === 'zotero' && ann.rects) {
+      // Zotero DB points converted by viewport
+      ann.rects.forEach(r => {
+        if (!Array.isArray(r) || r.length < 4) return;
+        let left, top, width, height;
+        if (viewport && typeof viewport.convertToViewportRectangle === 'function') {
+          const [vx1, vy1, vx2, vy2] = viewport.convertToViewportRectangle(r);
+          left = Math.min(vx1, vx2);
+          top = Math.min(vy1, vy2);
+          width = Math.abs(vx1 - vx2);
+          height = Math.abs(vy1 - vy2);
+        } else {
+          left = r[0] * state.scale;
+          top = r[1] * state.scale;
+          width = (r[2] - r[0]) * state.scale;
+          height = (r[3] - r[1]) * state.scale;
+        }
+
+        const mark = document.createElement('div');
+        mark.className = `pdf-annotation-mark mode-${mode}`;
+        mark.style.left = `${left}px`;
+        mark.style.top = `${top}px`;
+        mark.style.width = `${width}px`;
+        mark.style.height = `${height}px`;
+        if (mode === 'underline') {
+          mark.style.borderBottomColor = color;
+        } else {
+          mark.style.backgroundColor = color;
+        }
+        attachMarkEvents(mark);
+        highlightLayer.appendChild(mark);
+      });
+    } else if (ann.rects) {
+      // Local annotations normalized rects
+      ann.rects.forEach(r => {
+        const left = r.left * state.scale;
+        const top = r.top * state.scale;
+        const width = r.width * state.scale;
+        const height = r.height * state.scale;
+
+        const mark = document.createElement('div');
+        mark.className = `pdf-annotation-mark mode-${mode}`;
+        mark.style.left = `${left}px`;
+        mark.style.top = `${top}px`;
+        mark.style.width = `${width}px`;
+        mark.style.height = `${height}px`;
+        if (mode === 'underline') {
+          mark.style.borderBottomColor = color;
+        } else {
+          mark.style.backgroundColor = color;
+        }
+        attachMarkEvents(mark);
+        highlightLayer.appendChild(mark);
+      });
+    }
+  });
+}
+
+async function applyAnnotation(color, mode) {
+  if (!state.selectedItem) {
+    showToast('请先选择文献');
+    return;
+  }
+
+  // 1. Direct mark edit (opened by clicking an existing annotation)
+  if (state.activeAnnotation) {
+    const ann = state.activeAnnotation;
+    const pageNum = ann.pageNum || (ann.pageIndex !== undefined ? ann.pageIndex + 1 : 1);
+
+    // Toggle OFF if user clicks the SAME color AND mode!
+    if (ann.color === color && ann.mode === mode) {
+      state.annotations = state.annotations.filter(a => a.id !== ann.id);
+      saveAnnotationsToStorage(state.selectedItem.itemKey);
+      deleteAnnotationOnServer(state.selectedItem.itemKey, ann.id);
+      renderAnnotationsForPage(pageNum);
+      state.activeAnnotation = null;
+      hideSelectionTooltip();
+      showToast('已取消标注');
+      return;
+    }
+
+    // Otherwise update color / mode in-place (no stacking!)
+    ann.color = color;
+    ann.mode = mode;
+    saveAnnotationsToStorage(state.selectedItem.itemKey);
+    try {
+      fetch(`/api/annotations/${encodeURIComponent(state.selectedItem.itemKey)}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(ann),
+      }).catch(() => {});
+    } catch (e) {}
+
+    renderAnnotationsForPage(pageNum);
+    state.activeAnnotation = null;
+    hideSelectionTooltip();
+    showToast(mode === 'underline' ? '已更新为下划线' : '已更新标注颜色');
+    return;
+  }
+
+  // 2. Text selected via range
+  if (!state.selectedRange) {
+    showToast('请先划选正文文本');
+    return;
+  }
+
+  const range = state.selectedRange;
+  const text = state.selectedText;
+  if (!text) return;
+
+  const pageWrapper = range.commonAncestorContainer.nodeType === 1
+    ? range.commonAncestorContainer.closest('.pdf-page-wrapper')
+    : range.commonAncestorContainer.parentElement?.closest('.pdf-page-wrapper');
+
+  if (!pageWrapper) {
+    showToast('未能定位页面位置');
+    return;
+  }
+
+  const pageNum = parseInt(pageWrapper.dataset.pageNum, 10);
+  const pageRect = pageWrapper.getBoundingClientRect();
+  const clientRects = range.getClientRects();
+
+  const normalizedRects = [];
+  for (let i = 0; i < clientRects.length; i++) {
+    const r = clientRects[i];
+    if (r.width > 0 && r.height > 0) {
+      normalizedRects.push({
+        left: (r.left - pageRect.left) / state.scale,
+        top: (r.top - pageRect.top) / state.scale,
+        width: r.width / state.scale,
+        height: r.height / state.scale,
+      });
+    }
+  }
+
+  if (normalizedRects.length === 0) return;
+
+  // Overlap detection with existing annotations
+  const overlapping = state.annotations.filter(a => isAnnotationOverlapping(a, pageNum, normalizedRects, text));
+
+  if (overlapping.length > 0) {
+    const firstOverlapping = overlapping[0];
+    // If user clicked the SAME color AND mode: TOGGLE OFF / REMOVE
+    if (firstOverlapping.color === color && (firstOverlapping.mode || 'highlight') === mode) {
+      const removedIds = overlapping.map(a => a.id);
+      state.annotations = state.annotations.filter(a => !removedIds.includes(a.id));
+      saveAnnotationsToStorage(state.selectedItem.itemKey);
+      removedIds.forEach(id => deleteAnnotationOnServer(state.selectedItem.itemKey, id));
+      renderAnnotationsForPage(pageNum);
+      hideSelectionTooltip();
+      showToast('已取消标注');
+      return;
+    }
+
+    // Different color or mode: REPLACE (remove old overlapping, apply new, NO STACKING!)
+    const removedIds = overlapping.map(a => a.id);
+    state.annotations = state.annotations.filter(a => !removedIds.includes(a.id));
+    removedIds.forEach(id => deleteAnnotationOnServer(state.selectedItem.itemKey, id));
+  }
+
+  const annId = 'ann_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5);
+  const ann = {
+    id: annId,
+    itemKey: state.selectedItem.itemKey,
+    pageNum: pageNum,
+    color: color,
+    mode: mode,
+    text: text,
+    rects: normalizedRects,
+    createdAt: Date.now(),
+  };
+
+  state.annotations.push(ann);
+  saveAnnotationsToStorage(state.selectedItem.itemKey);
+
+  // Sync to sidecar backend
+  try {
+    fetch(`/api/annotations/${encodeURIComponent(state.selectedItem.itemKey)}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(ann),
+    }).catch(() => {});
+  } catch (e) {}
+
+  renderAnnotationsForPage(pageNum);
+
+  if (!state.isTranslationOpen) {
+    hideSelectionTooltip();
+  }
+  showToast(mode === 'underline' ? '已添加下划线标注' : '已添加高亮标注');
+}
+
+function clearCurrentAnnotation() {
+  if (!state.selectedItem) return;
+
+  let targetPageNum = null;
+  const removedIds = [];
+
+  if (state.activeAnnotation) {
+    targetPageNum = state.activeAnnotation.pageNum || (state.activeAnnotation.pageIndex !== undefined ? state.activeAnnotation.pageIndex + 1 : 1);
+    removedIds.push(state.activeAnnotation.id);
+    state.annotations = state.annotations.filter(a => a.id !== state.activeAnnotation.id);
+  } else if (state.selectedRange) {
+    const range = state.selectedRange;
+    const pageWrapper = range.commonAncestorContainer.nodeType === 1
+      ? range.commonAncestorContainer.closest('.pdf-page-wrapper')
+      : range.commonAncestorContainer.parentElement?.closest('.pdf-page-wrapper');
+    if (pageWrapper) {
+      targetPageNum = parseInt(pageWrapper.dataset.pageNum, 10);
+      const pageRect = pageWrapper.getBoundingClientRect();
+      const clientRects = range.getClientRects();
+      const normalizedRects = [];
+      for (let i = 0; i < clientRects.length; i++) {
+        const r = clientRects[i];
+        if (r.width > 0 && r.height > 0) {
+          normalizedRects.push({
+            left: (r.left - pageRect.left) / state.scale,
+            top: (r.top - pageRect.top) / state.scale,
+            width: r.width / state.scale,
+            height: r.height / state.scale,
+          });
+        }
+      }
+      const overlapping = state.annotations.filter(a => isAnnotationOverlapping(a, targetPageNum, normalizedRects, state.selectedText));
+      overlapping.forEach(a => removedIds.push(a.id));
+      if (removedIds.length > 0) {
+        state.annotations = state.annotations.filter(a => !removedIds.includes(a.id));
+      }
+    }
+  }
+
+  if (removedIds.length > 0) {
+    saveAnnotationsToStorage(state.selectedItem.itemKey);
+    removedIds.forEach(id => deleteAnnotationOnServer(state.selectedItem.itemKey, id));
+    if (targetPageNum) {
+      renderAnnotationsForPage(targetPageNum);
+    }
+    showToast('已清除标注');
+  } else {
+    showToast('当前选中区域无标注');
+  }
+
+  state.activeAnnotation = null;
+  hideSelectionTooltip();
+}
+
+// --- Translation Logic (Figure 2) ---
+let currentTransWord = '';
+
+async function toggleTranslation() {
+  const tooltipTranslateBtn = document.getElementById('tooltipTranslateBtn');
+  const tooltipTranslationCard = document.getElementById('tooltipTranslationCard');
+  const transPhoneticsRow = document.getElementById('transPhoneticsRow');
+  const usPhoneText = document.getElementById('usPhoneText');
+  const ukPhoneText = document.getElementById('ukPhoneText');
+  const transResultBody = document.getElementById('transResultBody');
+  const speakUsBtn = document.getElementById('speakUsBtn');
+  const speakUkBtn = document.getElementById('speakUkBtn');
+
+  if (!state.selectedText) return;
+
+  if (state.isTranslationOpen) {
+    state.isTranslationOpen = false;
+    if (tooltipTranslationCard) tooltipTranslationCard.style.display = 'none';
+    if (tooltipTranslateBtn) tooltipTranslateBtn.classList.remove('active');
+    return;
+  }
+
+  state.isTranslationOpen = true;
+  if (tooltipTranslateBtn) tooltipTranslateBtn.classList.add('active');
+  if (tooltipTranslationCard) tooltipTranslationCard.style.display = 'flex';
+  if (transResultBody) transResultBody.textContent = '正在查询释义...';
+  if (transPhoneticsRow) transPhoneticsRow.style.display = 'none';
+
+  try {
+    const s = state.settings || DEFAULT_SETTINGS;
+    const reqPayload = {
+      text: state.selectedText,
+      engine: s.transEngine || 'builtin',
+      api_base: s.transApiBase,
+      api_key: s.transApiKey,
+      model: s.transModel,
+      prompt: s.transPrompt,
+    };
+
+    const res = await fetch('/api/translate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(reqPayload),
+    });
+
+    if (!res.ok) {
+      if (transResultBody) transResultBody.textContent = `翻译服务响应异常 (HTTP ${res.status})，请刷新侧边栏重试`;
+      return;
+    }
+    const data = await res.json();
+    if (!data.success) {
+      if (transResultBody) transResultBody.textContent = data.error || '未能查询到该词释义';
+      return;
+    }
+
+    currentTransWord = data.query || state.selectedText;
+    if (data.is_word && (data.usphone || data.ukphone)) {
+      if (transPhoneticsRow) transPhoneticsRow.style.display = 'flex';
+      if (usPhoneText) usPhoneText.textContent = data.usphone ? `[${data.usphone}]` : '';
+      if (ukPhoneText) ukPhoneText.textContent = data.ukphone ? `[${data.ukphone}]` : '';
+      if (speakUsBtn) speakUsBtn.style.display = data.usphone ? 'flex' : 'none';
+      if (speakUkBtn) speakUkBtn.style.display = data.ukphone ? 'flex' : 'none';
+    } else {
+      if (transPhoneticsRow) transPhoneticsRow.style.display = 'none';
+    }
+
+    if (transResultBody) transResultBody.textContent = data.translation || '（无释义）';
+
+    // Auto-adjust tooltip vertical position if expanding past window bottom
+    setTimeout(() => {
+      if (selectionTooltipEl && selectionTooltipEl.classList.contains('show')) {
+        const tooltipRect = selectionTooltipEl.getBoundingClientRect();
+        if (tooltipRect.bottom > window.innerHeight - 10) {
+          const overflow = tooltipRect.bottom - (window.innerHeight - 10);
+          const currentTop = parseFloat(selectionTooltipEl.style.top) || 0;
+          selectionTooltipEl.style.top = `${Math.max(10, currentTop - overflow)}px`;
+        }
+      }
+    }, 50);
+  } catch (e) {
+    if (transResultBody) transResultBody.textContent = '查询释义失败: ' + e.message;
+  }
+}
+
+function speakCurrentWord(lang = 'en-US') {
+  if (!currentTransWord) return;
+  if ('speechSynthesis' in window) {
+    window.speechSynthesis.cancel();
+    const u = new SpeechSynthesisUtterance(currentTransWord);
+    u.lang = lang;
+    window.speechSynthesis.speak(u);
+  }
+}
+
+// Text Selection & Action Tooltip
+function handleTextSelection(e) {
+  // If clicked inside selection tooltip, do not collapse
+  if (selectionTooltipEl && selectionTooltipEl.contains(e.target)) {
+    return;
+  }
+
+  const selection = window.getSelection();
+  let text = selection ? selection.toString() : '';
+  text = text.trim();
+
+  if (text.length >= 1) {
     try {
       const range = selection.getRangeAt(0);
+
+      // Zotero-style Smart Word Snapping & Boundary Precision
+      const isSingleWord = !/\s/.test(text);
+      if (isSingleWord && text.length > 0) {
+        // 1. Strip leading and trailing punctuation (e.g. "model," -> "model", "(BERT)" -> "BERT")
+        const cleaned = text.replace(/^[^\w\u4e00-\u9fa5]+|[^\w\u4e00-\u9fa5]+$/g, '');
+        if (cleaned.length > 0 && cleaned !== text) {
+          if (range.startContainer === range.endContainer && range.startContainer.nodeType === Node.TEXT_NODE) {
+            const rawNodeText = range.startContainer.textContent;
+            const subStr = rawNodeText.substring(range.startOffset, range.endOffset);
+            const leadMatch = subStr.match(/^[^\w\u4e00-\u9fa5]+/);
+            const trailMatch = subStr.match(/[^\w\u4e00-\u9fa5]+$/);
+            const leadLen = leadMatch ? leadMatch[0].length : 0;
+            const trailLen = trailMatch ? trailMatch[0].length : 0;
+
+            if (range.endOffset - trailLen > range.startOffset + leadLen) {
+              range.setStart(range.startContainer, range.startOffset + leadLen);
+              range.setEnd(range.startContainer, range.endOffset - trailLen);
+              selection.removeAllRanges();
+              selection.addRange(range);
+            }
+          }
+          text = cleaned;
+        }
+
+        // 2. Multi-span word fragmentation check on double click
+        if (e.detail >= 2 && range.startContainer && range.startContainer.parentElement) {
+          const currentSpan = range.startContainer.parentElement;
+          if (currentSpan.classList && (currentSpan.tagName === 'SPAN' || currentSpan.closest('.textLayer'))) {
+            const nextSpan = currentSpan.nextElementSibling;
+            if (nextSpan && nextSpan.tagName === 'SPAN' && nextSpan.firstChild) {
+              const nextText = nextSpan.textContent || '';
+              if (/[\w\u4e00-\u9fa5]$/.test(text) && /^[\w\u4e00-\u9fa5]/.test(nextText)) {
+                const curRect = currentSpan.getBoundingClientRect();
+                const nextRect = nextSpan.getBoundingClientRect();
+                if (Math.abs(curRect.top - nextRect.top) < 6 && (nextRect.left - curRect.right) < 6) {
+                  const nextWordPart = nextText.split(/[\s\p{P}]/u)[0];
+                  if (nextWordPart) {
+                    range.setEnd(nextSpan.firstChild, nextWordPart.length);
+                    selection.removeAllRanges();
+                    selection.addRange(range);
+                    text = text + nextWordPart;
+                  }
+                }
+              }
+            }
+          }
+        }
+      } else if (text.length > 0) {
+        // Multi-word selection: clean line-break hyphens e.g. "convolu-\n tional" -> "convolutional"
+        text = text.replace(/(\w+)-\s*\n\s*(\w+)/g, '$1$2').replace(/\s+/g, ' ').trim();
+      }
+
+      state.activeAnnotation = null;
+      state.selectedText = text;
+      state.selectedRange = range.cloneRange();
       const rect = range.getBoundingClientRect();
-      selectionTooltipEl.style.left = `${Math.max(10, rect.left + window.scrollX - 40)}px`;
-      selectionTooltipEl.style.top = `${Math.max(10, rect.top + window.scrollY - 42)}px`;
-      selectionTooltipEl.classList.add('show');
-    } catch (e) {}
+      if (rect.width === 0 && rect.height === 0) {
+        hideSelectionTooltip();
+        return;
+      }
+
+      showTooltipAtRect(rect);
+    } catch (err) {
+      hideSelectionTooltip();
+    }
   } else {
+    // If not dragging/selecting text, hit-test if user clicked directly on an existing mark
+    const targetWrapper = e.target.closest ? e.target.closest('.pdf-page-wrapper') : null;
+    if (targetWrapper && state.annotations && state.annotations.length > 0) {
+      const pageNum = parseInt(targetWrapper.dataset.pageNum, 10);
+      const pageRect = targetWrapper.getBoundingClientRect();
+      const clickX = (e.clientX - pageRect.left) / state.scale;
+      const clickY = (e.clientY - pageRect.top) / state.scale;
+
+      const clickedAnn = state.annotations.find(ann => {
+        const annPage = ann.pageNum !== undefined ? ann.pageNum : (ann.pageIndex !== undefined ? ann.pageIndex + 1 : 1);
+        if (annPage !== pageNum) return false;
+        if (!ann.rects) return false;
+        return ann.rects.some(r => {
+          let rectObj = r;
+          if (Array.isArray(r) && r.length >= 4) {
+            rectObj = {
+              left: Math.min(r[0], r[2]),
+              top: Math.min(r[1], r[3]),
+              width: Math.abs(r[2] - r[0]),
+              height: Math.abs(r[3] - r[1]),
+            };
+          }
+          return clickX >= (rectObj.left - 4) && clickX <= (rectObj.left + rectObj.width + 4) &&
+                 clickY >= (rectObj.top - 2) && clickY <= (rectObj.top + rectObj.height + 2);
+        });
+      });
+
+      if (clickedAnn) {
+        state.activeAnnotation = clickedAnn;
+        state.selectedText = clickedAnn.text || '';
+        state.selectedRange = null;
+
+        const modeHighlightBtn = document.getElementById('modeHighlightBtn');
+        const modeUnderlineBtn = document.getElementById('modeUnderlineBtn');
+        const annMode = clickedAnn.mode || (clickedAnn.annotationType === 3 ? 'underline' : 'highlight');
+        if (annMode === 'underline') {
+          state.annotationMode = 'underline';
+          if (modeUnderlineBtn) modeUnderlineBtn.classList.add('active');
+          if (modeHighlightBtn) modeHighlightBtn.classList.remove('active');
+        } else {
+          state.annotationMode = 'highlight';
+          if (modeHighlightBtn) modeHighlightBtn.classList.add('active');
+          if (modeUnderlineBtn) modeUnderlineBtn.classList.remove('active');
+        }
+
+        showTooltipAtRect({
+          left: e.clientX,
+          top: e.clientY,
+          right: e.clientX,
+          bottom: e.clientY,
+          width: 0,
+          height: 0,
+        });
+        return;
+      }
+    }
+
+    state.activeAnnotation = null;
     hideSelectionTooltip();
   }
 }
 
 function hideSelectionTooltip() {
   selectionTooltipEl.classList.remove('show');
+  state.isTranslationOpen = false;
+  const tooltipTranslationCard = document.getElementById('tooltipTranslationCard');
+  const tooltipTranslateBtn = document.getElementById('tooltipTranslateBtn');
+  if (tooltipTranslationCard) tooltipTranslationCard.style.display = 'none';
+  if (tooltipTranslateBtn) tooltipTranslateBtn.classList.remove('active');
 }
 
 function copyToClipboard(text, message) {

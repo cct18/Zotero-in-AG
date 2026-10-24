@@ -52,7 +52,9 @@ def zotero_search(
     for i, it in enumerate(items, 1):
         key = it["itemKey"]
         title = it.get("title") or "（无标题）"
-        authors = ", ".join(it.get("creators", [])) or "未知作者"
+        authors = ", ".join(it.get("creators", []))
+        if not authors:
+            authors = "PDF 独立文档" if it.get("itemType") == "attachment" else "未知作者"
         date = it.get("date") or "未知年份"
         pub = it.get("publication") or ""
         has_pdf = "✅ 有 PDF 原文" if it.get("hasPdf") else "❌ 无本地 PDF"
@@ -106,7 +108,9 @@ def zotero_get_item(item_key: str) -> str:
         return f"错误：未找到 Key 为 `{item_key}` 的文献条目。"
 
     title = item.get("title") or "（无标题）"
-    authors = ", ".join(item.get("creators", [])) or "未知作者"
+    authors = ", ".join(item.get("creators", []))
+    if not authors:
+        authors = "PDF 独立文档" if item.get("itemType") == "attachment" else "未知作者"
     abstract = item.get("abstractNote") or "（无摘要）"
     date = item.get("date") or "未知"
     doi = item.get("DOI") or "无"

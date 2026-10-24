@@ -21,14 +21,16 @@ class ZoteroAPIClient:
 
     def create_item_note(
         self,
-        parent_item_key: str,
+        parent_item_key: Optional[str],
         note_title: str,
         note_markdown: str,
         tags: Optional[list[str]] = None,
+        collection_keys: Optional[list[str]] = None,
     ) -> dict[str, Any]:
         """
-        Creates a child note under parent_item_key via Zotero 7/10 Local API.
-        Option A: Independent Rich-text Note attached to the item.
+        Creates a note via Zotero 7/10 Local API.
+        - For regular literature items: attached under parent_item_key.
+        - For standalone PDFs (no parent item): created directly inside the collection (目录) or root library.
         """
         if not self.is_running():
             return {
@@ -39,14 +41,35 @@ class ZoteroAPIClient:
         # Convert simple markdown to clean HTML for Zotero notes
         html_content = self._markdown_to_zotero_html(note_title, note_markdown)
 
-        payload = [
-            {
-                "itemType": "note",
-                "parentItem": parent_item_key,
-                "note": html_content,
-                "tags": [{"tag": t} for t in (tags or ["agent-note", "antigravity"])],
-            }
-        ]
+        # Check if parent_item_key is a standalone attachment (has no parent)
+        is_standalone = False
+        target_collections = list(collection_keys) if collection_keys else []
+        if parent_item_key:
+            try:
+                from .db import ZoteroDB
+                item = ZoteroDB().get_item_by_key(parent_item_key)
+                if item and item.get("itemType") == "attachment":
+                    is_standalone = True
+                    if not target_collections and item.get("collections"):
+                        target_collections = [c["key"] for c in item["collections"] if "key" in c]
+            except Exception:
+                pass
+
+        note_item: dict[str, Any] = {
+            "itemType": "note",
+            "note": html_content,
+            "tags": [{"tag": t} for t in (tags or ["agent-note", "antigravity"])],
+        }
+
+        if is_standalone:
+            if target_collections:
+                note_item["collections"] = target_collections
+            success_msg = f"成功在目录 [{', '.join(target_collections) or '根目录'}] 中为独立文档 [{parent_item_key}] 创建独立精读笔记！"
+        else:
+            note_item["parentItem"] = parent_item_key
+            success_msg = f"成功为文献 [{parent_item_key}] 创建独立精读笔记！"
+
+        payload = [note_item]
 
         try:
             with self._get_client(timeout=5.0) as client:
@@ -59,7 +82,7 @@ class ZoteroAPIClient:
                     return {
                         "success": True,
                         "data": resp.json() if resp.text else {},
-                        "message": f"成功为文献 [{parent_item_key}] 创建独立精读笔记！",
+                        "message": success_msg,
                     }
                 else:
                     return {

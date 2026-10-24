@@ -57,6 +57,54 @@ def test_sidecar_endpoints():
     assert locate_res.status_code == 200
     assert "success" in locate_res.json()
 
+    print("--- 8. Testing GET & POST /api/translate ---")
+    trans_word = client.get("/api/translate?text=variation")
+    assert trans_word.status_code == 200
+    assert trans_word.json()["success"] is True
+    assert "translation" in trans_word.json()
+    print("Word translation response:", trans_word.json()["translation"][:40])
+
+    trans_sent = client.post("/api/translate", json={
+        "text": "The dominant sequence transduction models are based on neural networks",
+        "engine": "builtin"
+    })
+    assert trans_sent.status_code == 200
+    assert trans_sent.json()["success"] is True
+    assert "translation" in trans_sent.json()
+    print("Sentence POST translation response:", trans_sent.json()["translation"][:40])
+
+    # Test /api/test_ai_model with empty key validation
+    test_empty = client.post("/api/test_ai_model", json={"api_key": ""})
+    assert test_empty.status_code == 200
+    assert test_empty.json()["success"] is False
+
+    print("--- 9. Testing GET /api/annotations/{key} ---")
+    ann_res = client.get(f"/api/annotations/{first_item['itemKey']}")
+    assert ann_res.status_code == 200
+    assert ann_res.json()["success"] is True
+    assert "zotero_annotations" in ann_res.json()
+    assert "local_annotations" in ann_res.json()
+    print("Annotations count:", len(ann_res.json()["zotero_annotations"]))
+
+    print("--- 10. Testing POST & DELETE /api/annotations ---")
+    test_ann = {
+        "id": "ann_test_123",
+        "itemKey": first_item['itemKey'],
+        "pageNum": 1,
+        "color": "#ffd400",
+        "mode": "highlight",
+        "text": "test selection",
+        "rects": [{"left": 10, "top": 10, "width": 100, "height": 20}],
+        "createdAt": 123456789
+    }
+    save_res = client.post(f"/api/annotations/{first_item['itemKey']}", json=test_ann)
+    assert save_res.status_code == 200
+    assert save_res.json()["success"] is True
+
+    del_res = client.delete(f"/api/annotations/{first_item['itemKey']}/ann_test_123")
+    assert del_res.status_code == 200
+    assert del_res.json()["success"] is True
+
     print("\n>>> ALL SIDECAR API TESTS PASSED SUCCESSFULLY! <<<")
 
 if __name__ == "__main__":

@@ -14,23 +14,33 @@
 1. **预览侧边栏原生集成 (Auxiliary Pane)**
    - 通过 `/zotero` 指令一键唤出侧边栏胶囊。
    - 树状展示本地 Collections 文献分类、实时模糊搜索、条目卡片。
+   - **极简发表时间排序**：目录栏右上角提供极简图标，一键在论文发表年份（新 ➔ 旧 / 旧 ➔ 新）之间即时切换。
+   - **全格式文献兼容**：完整支持标准文献条目与未挂靠父条目的**独立 PDF**，智能识别并标注 `[PDF]`。
    - 默认展示极简欢迎页，点击打开文献后自适应铺满主舞台。
-2. **极速自适应 PDF 阅读器 (Continuous Scroll & Fit Width)**
+2. **极速自适应 PDF 阅读器与动态选区护盾 (PDF.js & Selection Shield)**
    - 内置轻量离线 **Mozilla PDF.js**，支持本地 PDF 原文毫秒级加载。
    - **自然滚轮翻页**：视口惰性加载（IntersectionObserver），百页大论文平滑滚动，内存占用极低。
    - **自适应宽度**：切换侧边栏宽度时自动保持满幅阅读，动态显示当前缩放百分比。
-3. **划选互动与双向桥梁 (Selection Action Tooltip)**
-   - 在侧边栏 PDF 中划选公式、图表或难懂段落，弹出悬浮动作胶囊：
-     - 💬 **问 Agent**：一键生成结构化上下文提问并发送给对话区。
-     - 📋 **引用**：快速复制包含引文标注的 Markdown 引用文本与 BibTeX。
-     - 🔗 **Zotero 定位**：一键调起本地 Zotero 桌面端并高亮选中条目。
+   - 🛡️ **Zotero 同款动态选区护盾 (Selection Shield)**：集成 `endOfContent` 动态拦截与智能词边界吸附，彻底杜绝划词时光标进入行尾留白导致向后跳选下方多段。
+3. **划选标记、即时释义与双向桥梁 (Selection Action Tooltip & Annotation)**
+   - 在侧边栏 PDF 中划选正文段落，弹出极简悬浮工具栏：
+     - 🎨 **Zotero 同款 8 色高亮与下划线**：复刻原生 8 色标记色盘，支持 `[A]` 高亮与 `[A_]` 下划线双模标记，实时在视口中保持贴合缩放，并直接直读 Zotero 历史批注。
+     - 🔤 **即时查词与自定义 AI 翻译**：集成美音/英音国际音标、纯发音播报（Web Speech API）与精选词义；长句学术翻译；支持免配置内置引擎及自定义接入任意 OpenAI 格式大模型（如 DeepSeek、OpenAI、Claude 等）。
+     - 💬 **纯矢量问 Agent**：纯矢量图标一键生成结构化上下文提问并发送给对话区。
+     - 📋 **纯矢量引用**：纯矢量图标快速复制包含引文标注的 Markdown 引用文本与规范 BibTeX。
+     - 悬浮窗内图标鼠标悬浮不显示多余文本描述，小巧清爽不挡视线。
 4. **方案 A 独立富文本笔记联动 (Option A)**
    - Agent 深度研读文献后，调用 MCP 工具直接在 Zotero 该条目下创建层级 Rich-text Note 独立子笔记。
-   - 绝不污染原版 PDF 文本，并在 Zotero 桌面端即时刷新。
-5. **无锁高可用引擎 (Zero File Locks)**
+   - 针对独立 PDF，笔记自动直接保存在所属分类目录中，条理清晰且绝不污染原版 PDF。
+5. **高度可定制外观、Prompt 与翻译模型中心 (Settings Hub)**
+   - 顶部提供原生设置中心，包含【外观】、【提示词】与【翻译】三大板块：
+     - **外观**：支持白天/黑夜模式、5 种个性化强调色（边框高亮联动反馈）与 PDF 护眼暖黄/暗调反色阅览底色；
+     - **提示词**：支持自由配置整文 Ask 与划词 Ask 的 Agent 提示词模板（支持 `{title}`、`{authors}`、`{year}`、`{selected_text}` 动态插槽）；
+     - **翻译**：支持在免配置引擎与自定义 AI 模型间一键切换，自定义 Base URL、API Key、Model 及专属学术翻译 System Prompt，支持一键连通性测试。
+6. **无锁高可用引擎 (Zero File Locks)**
    - 采用 `?mode=ro&immutable=1` 只读无锁连接与毫秒级连接释放机制。
    - 即使在 Windows 严格文件锁机制下，也能与 Zotero 桌面端并发共存，绝不阻塞 Zotero 启动。
-6. **基于 `uv` 的极速现代后端 (Zero-Config)**
+7. **基于 `uv` 的极速现代后端 (Zero-Config)**
    - 依赖声明于 `pyproject.toml`，由 Rust 驱动的 `uv` 跨平台秒级就绪。
    - 自动跨平台探测 Windows、macOS 和 Linux 上的 Zotero 数据目录与安装位置。
 
@@ -46,6 +56,7 @@ zotero-in-ag/
 ├── uv.lock                        # 跨平台依赖锁文件
 ├── LICENSE                        # MIT 开源许可证
 ├── README.md                      # 项目主页与说明
+├── CHANGELOG.md                   # 插件全版本更新日志 (SemVer 规范)
 ├── PROJECT_STRUCTURE.md           # 插件开发与架构设计文档
 ├── assets/
 │   └── logo.svg                   # 插件 Logo 图标

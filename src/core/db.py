@@ -65,17 +65,23 @@ class ZoteroDB:
         tag: Optional[str] = None,
         limit: int = 100,
         offset: int = 0,
+        order_by: str = "date_desc",
     ) -> list[dict[str, Any]]:
+        # Allow regular literature items OR standalone PDF attachments
         where_clauses = [
-            "t.typeName NOT IN ('attachment', 'note', 'annotation')",
+            """(
+                t.typeName NOT IN ('attachment', 'note', 'annotation')
+                OR (t.typeName = 'attachment' AND ia_self.contentType = 'application/pdf' AND (ia_self.parentItemID IS NULL OR ia_self.parentItemID = 0))
+            )""",
             "i.itemID NOT IN (SELECT itemID FROM deletedItems)",
         ]
         params: list[Any] = []
 
         joins = [
             "JOIN itemTypes t ON i.itemTypeID = t.itemTypeID",
-            "LEFT JOIN itemAttachments ia ON i.itemID = ia.parentItemID AND ia.contentType = 'application/pdf'",
-            "LEFT JOIN items att_item ON ia.itemID = att_item.itemID",
+            "LEFT JOIN itemAttachments ia_child ON i.itemID = ia_child.parentItemID AND ia_child.contentType = 'application/pdf'",
+            "LEFT JOIN items att_child_item ON ia_child.itemID = att_child_item.itemID",
+            "LEFT JOIN itemAttachments ia_self ON i.itemID = ia_self.itemID AND ia_self.contentType = 'application/pdf'",
         ]
 
         if collection_key:
@@ -103,29 +109,56 @@ class ZoteroDB:
                     JOIN creators cr ON ic.creatorID = cr.creatorID
                     WHERE ic.itemID = i.itemID AND (cr.firstName LIKE ? OR cr.lastName LIKE ?)
                 )
+                OR (t.typeName = 'attachment' AND ia_self.path LIKE ?)
             )""")
-            params.extend([q_str, q_str, q_str])
+            params.extend([q_str, q_str, q_str, q_str])
 
         where_sql = " AND ".join(where_clauses)
         join_sql = " ".join(joins)
+
+        # Build order by clause
+        if order_by == "date_asc":
+            order_sql = "CASE WHEN date IS NULL OR date = '' THEN 1 ELSE 0 END, date ASC, i.dateModified ASC"
+        elif order_by == "added_desc":
+            order_sql = "i.dateAdded DESC"
+        elif order_by == "added_asc":
+            order_sql = "i.dateAdded ASC"
+        elif order_by == "modified_asc":
+            order_sql = "i.dateModified ASC"
+        elif order_by == "modified_desc":
+            order_sql = "i.dateModified DESC"
+        else: # date_desc (default)
+            order_sql = "CASE WHEN date IS NULL OR date = '' THEN 1 ELSE 0 END, date DESC, i.dateModified DESC"
 
         sql = f"""
             SELECT 
                 i.itemID,
                 i.key as itemKey,
                 t.typeName as itemType,
-                (SELECT v.value FROM itemData d JOIN itemDataValues v ON d.valueID = v.valueID JOIN fields f ON d.fieldID = f.fieldID WHERE d.itemID = i.itemID AND f.fieldName = 'title' LIMIT 1) as title,
+                COALESCE(
+                    (SELECT v.value FROM itemData d JOIN itemDataValues v ON d.valueID = v.valueID JOIN fields f ON d.fieldID = f.fieldID WHERE d.itemID = i.itemID AND f.fieldName = 'title' LIMIT 1),
+                    CASE 
+                        WHEN t.typeName = 'attachment' THEN 
+                            COALESCE(
+                                (SELECT REPLACE(ia_sub.path, 'storage:', '') FROM itemAttachments ia_sub WHERE ia_sub.itemID = i.itemID),
+                                '未命名 PDF'
+                            )
+                        ELSE NULL 
+                    END
+                ) as title,
                 (SELECT v.value FROM itemData d JOIN itemDataValues v ON d.valueID = v.valueID JOIN fields f ON d.fieldID = f.fieldID WHERE d.itemID = i.itemID AND f.fieldName = 'date' LIMIT 1) as date,
                 (SELECT v.value FROM itemData d JOIN itemDataValues v ON d.valueID = v.valueID JOIN fields f ON d.fieldID = f.fieldID WHERE d.itemID = i.itemID AND f.fieldName = 'publicationTitle' LIMIT 1) as publication,
                 (SELECT v.value FROM itemData d JOIN itemDataValues v ON d.valueID = v.valueID JOIN fields f ON d.fieldID = f.fieldID WHERE d.itemID = i.itemID AND f.fieldName = 'abstractNote' LIMIT 1) as abstractNote,
                 (SELECT v.value FROM itemData d JOIN itemDataValues v ON d.valueID = v.valueID JOIN fields f ON d.fieldID = f.fieldID WHERE d.itemID = i.itemID AND f.fieldName = 'DOI' LIMIT 1) as doi,
-                att_item.key as pdfAttachmentKey,
-                ia.path as pdfPath
+                COALESCE(att_child_item.key, CASE WHEN t.typeName = 'attachment' THEN i.key ELSE NULL END) as pdfAttachmentKey,
+                COALESCE(ia_child.path, ia_self.path) as pdfPath,
+                i.dateAdded,
+                i.dateModified
             FROM items i
             {join_sql}
             WHERE {where_sql}
             GROUP BY i.itemID
-            ORDER BY i.dateModified DESC
+            ORDER BY {order_sql}
             LIMIT ? OFFSET ?
         """
         params.extend([limit, offset])
@@ -218,6 +251,21 @@ class ZoteroDB:
             """, (item_id,))
             item["pdfAttachments"] = [dict(r) for r in cur.fetchall()]
 
+            # If this is a standalone attachment itself, populate pdfAttachments directly
+            if item.get("itemType") == "attachment":
+                cur.execute("""
+                    SELECT i.key as attachmentKey, ia.contentType, ia.path
+                    FROM itemAttachments ia
+                    JOIN items i ON ia.itemID = i.itemID
+                    WHERE ia.itemID = ? AND ia.contentType = 'application/pdf'
+                """, (item_id,))
+                self_att = cur.fetchone()
+                if self_att:
+                    att_dict = dict(self_att)
+                    item["pdfAttachments"] = [att_dict]
+                    if not item.get("title") and att_dict.get("path"):
+                        item["title"] = att_dict["path"].replace("storage:", "").strip()
+
             cur.execute("""
                 SELECT n.title, n.note, note_item.key as noteKey
                 FROM itemNotes n
@@ -231,6 +279,7 @@ class ZoteroDB:
     def get_pdf_attachment_for_item(self, item_key: str) -> Optional[dict[str, Any]]:
         with self._get_connection() as conn:
             cur = conn.cursor()
+            # 1. Try finding child attachment under parent item
             cur.execute("""
                 SELECT 
                     att_item.key as attachmentKey, 
@@ -243,12 +292,62 @@ class ZoteroDB:
                 LIMIT 1
             """, (item_key,))
             r = cur.fetchone()
-            if not r:
-                return None
-            return dict(r)
+            if r:
+                return dict(r)
+
+            # 2. Try checking if item_key is a standalone attachment itself
+            cur.execute("""
+                SELECT 
+                    i.key as attachmentKey,
+                    ia.path,
+                    ia.contentType
+                FROM items i
+                JOIN itemAttachments ia ON i.itemID = ia.itemID
+                WHERE i.key = ? AND ia.contentType = 'application/pdf'
+                LIMIT 1
+            """, (item_key,))
+            r2 = cur.fetchone()
+            if r2:
+                return dict(r2)
+
+            return None
 
     def get_tags(self) -> list[str]:
         with self._get_connection() as conn:
             cur = conn.cursor()
             cur.execute("SELECT name FROM tags ORDER BY name ASC")
             return [r["name"] for r in cur.fetchall()]
+
+    def get_annotations_for_item(self, item_key: str) -> list[dict[str, Any]]:
+        """
+        Retrieves PDF annotations (highlights, underlines, notes) stored in Zotero's itemAnnotations table.
+        """
+        with self._get_connection() as conn:
+            cur = conn.cursor()
+            cur.execute("SELECT itemID, itemTypeID FROM items WHERE key = ?", (item_key,))
+            base = cur.fetchone()
+            if not base:
+                return []
+            item_id = base["itemID"]
+
+            cur.execute("""
+                SELECT 
+                    a.itemID as annotationId,
+                    a.type as annotationType,
+                    a.color,
+                    a.text,
+                    a.comment,
+                    a.pageLabel,
+                    a.sortIndex,
+                    a.position,
+                    att_item.key as attachmentKey
+                FROM itemAnnotations a
+                JOIN items att_item ON a.parentItemID = att_item.itemID
+                WHERE a.parentItemID IN (
+                    SELECT itemID FROM itemAttachments WHERE parentItemID = ?
+                    UNION
+                    SELECT ?
+                )
+                ORDER BY a.sortIndex ASC
+            """, (item_id, item_id))
+            return [dict(r) for r in cur.fetchall()]

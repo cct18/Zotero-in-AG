@@ -62,10 +62,33 @@ def test_zotero_api():
     running = client.is_running()
     print(f"\n[API] Zotero desktop running check: {running}")
 
+def test_standalone_pdf_and_sorting():
+    db = ZoteroDB()
+    # Test sorting order_by
+    items_desc = db.get_items(limit=5, order_by="date_desc")
+    items_asc = db.get_items(limit=5, order_by="date_asc")
+    print(f"\n[DB Sorting] date_desc top: {items_desc[0].get('title')[:30]} ({items_desc[0].get('date')})")
+    print(f"[DB Sorting] date_asc top: {items_asc[0].get('title')[:30]} ({items_asc[0].get('date')})")
+    assert len(items_desc) > 0
+    assert len(items_asc) > 0
+
+    # Test standalone PDF retrieval
+    all_items = db.get_items(limit=100)
+    standalone_items = [it for it in all_items if it.get("itemType") == "attachment"]
+    print(f"[DB Standalone] Found {len(standalone_items)} standalone attachments:")
+    for st in standalone_items:
+        print(f"  - Key: {st['itemKey']} | Title: {st.get('title')} | PDF Key: {st.get('pdfAttachmentKey')}")
+        assert st.get("hasPdf") is True
+        # Verify get_pdf_attachment_for_item
+        att = db.get_pdf_attachment_for_item(st["itemKey"])
+        assert att is not None
+        assert att["attachmentKey"] == st["itemKey"]
+
 if __name__ == "__main__":
     test_config()
     test_db_collections()
     test_db_items()
+    test_standalone_pdf_and_sorting()
     test_pdf_resolution_and_text()
     test_zotero_api()
     print("\n>>> ALL CORE TESTS PASSED SUCCESSFULLY! <<<")

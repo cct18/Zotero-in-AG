@@ -1,10 +1,10 @@
 # Zotero in AG 插件开发与架构设计文档
 
 > **插件名称**: Zotero in AG (Zotero Literature Hub for Google Antigravity)  
-> **最新版本**: v1.0.0  
+> **最新版本**: v2.0.0  
 > **适用宿主**: Google Antigravity 2.0+ (桌面端 Electron 及 IDE 体系)  
 > **运行环境**: Python >= 3.11, Astral `uv`, Zotero (7 / 8 / 9 / 10+)  
-> **文档定位**: 插件开发者指南、架构与构建流程全解、工程维护规范与版本更新日志
+> **文档定位**: 插件开发者指南、系统架构设计、工程开发规范（更新日志详见 [CHANGELOG.md](CHANGELOG.md)）
 
 ---
 
@@ -80,6 +80,7 @@ zotero-in-ag/
 ├── plugin.json                  # Antigravity 插件核心描述清单（名称、版本、Prompt 入口）
 ├── mcp_config.json              # Antigravity 内嵌 MCP 工具服务启动声明
 ├── README.md                    # 开源项目主页与快速上手说明
+├── CHANGELOG.md                 # 插件全版本演进与发布日志 (SemVer 规范)
 ├── PROJECT_STRUCTURE.md         # 插件开发与架构设计文档（本文档）
 ├── LICENSE                      # MIT 开源许可证
 ├── assets/
@@ -141,26 +142,16 @@ zotero-in-ag/
 - **Sidecar 相对工作目录执行**：`sidecar.json` 采用 `--directory ../..` 通用相对路径，解决 Antigravity 默认将 `cwd` 置于子目录所导致的 `exit status 2`（模块找不到）问题，确保任何克隆路径均可直接启动。
 - **系统调用解耦**：桌面端定位条目兼容 Windows（`os.startfile`）、macOS（`open`）与 Linux（`xdg-open`），彻底杜绝跨平台运行异常。
 
+### 4.5 动态选区护盾机制 (Selection Shield / endOfContent)
+- **绝对定位与留白虚空**：PDF.js 的 TextLayer 并非流式排版，而是离散的绝对定位 Span。行尾留白与段间距在 DOM 中无元素占位，鼠标稍出单词便会引发 Chromium 选区向后穿透导致跳选。
+- **Zotero 同款动态拦截**：文字 Span 设置 `z-index: 1`，底层注入全页覆盖的 `endOfContent` 守卫元素（`z-index: 0`）。在 `selectionchange` 期间动态将守卫插在当前激活词节点的 `nextSibling`，鼠标一进留白立即被护盾拦截，彻底锁死选区终点；释放鼠标后平滑复位。
+
 ---
 
-## 5. 插件更新记录与公告 (Changelog & Release Notes)
+## 5. 项目版本与更新日志 (Version History)
 
-### 📢 [v1.0.0] - 2026-10-22（里程碑正式版本发布）
-
-#### ✨ 新特性与架构创新
-- **全套原生嵌入体验**：通过 Antigravity Auxiliary Pane（预览侧边栏）无缝整合 Zotero 7/8/9/10+ 全版本。
-- **连续无极滚动阅读**：集成 Mozilla PDF.js，支持滚轮平滑阅读、视口惰性渲染与宽度自适应重算。
-- **6 大原子 MCP 学术工具**：提供 `zotero_search`、`zotero_get_collections`、`zotero_get_item`、`zotero_read_pdf`、`zotero_add_note`、`zotero_add_tags`。
-- **方案 A 独立富文本笔记**：Agent 精读产出直接写入 Zotero 子笔记，绝不污染原始 PDF。
-- **划选交互气泡**：在侧边栏中划选公式或正文，一键向 Agent 提问、复制标准引用或调起 Zotero 客户端定位。
-
-#### 🛠️ 深度优化与稳定性修复
-- **彻底解决 Zotero 启动卡绿色进度条问题**：排查并消除了 SQLite 数据库文件句柄争用，升级为不可变只读无锁连接（`immutable=1`），并完善了崩溃锁与失效视图的自愈机制。
-- **Sidecar 启动路径自愈**：通过 `--directory ../..` 修复了子目录 `cwd` 层级引起的 `exit status 2` 报错，实现任意工作区无感秒启。
-- **UI 视觉与规范对齐**：折叠侧边栏图标完全对齐 Antigravity 原生 `layout-sidebar-left` 设计规范；未选文献时主界面保持极简留白。
-- **快捷指令极致精简**：输入 `/zotero` 时仅输出纯净的两行快捷唤起胶囊，移除冗余干扰文本。
-- **1:3 比例固化**：Auxiliary Pane 预设宽度锁定为 75%，确保对话区与文献工作台呈现黄金阅读比例。
-- **跨平台多用户可用性**：彻底剔除本地硬编码绝对路径，升级为全平台自适应探测，确保开源克隆即可开箱即用。
+> 详细的版本演进记录、新特性清单、架构优化与 Bug 修复历史，请统一参阅独立的更新日志文件：  
+> 📄 **[CHANGELOG.md](CHANGELOG.md)**
 
 ---
 
@@ -168,4 +159,5 @@ zotero-in-ag/
 
 - [ ] **语义向量检索**：基于本地嵌入模型，为 Zotero 论文库构建向量索引，支持跨文献的语义概念检索。
 - [ ] **多篇论文横向对比**：在侧边栏支持多 Tab 或双栏对比模式，便于横向比对不同实验结论。
+- [ ] **BibTeX 一键导出与 LaTeX 联动**：在 Antigravity 编写论文代码时，支持由 Agent 自动补全 `.bib` 文件条目。
 - [ ] **BibTeX 一键导出与 LaTeX 联动**：在 Antigravity 编写论文代码时，支持由 Agent 自动补全 `.bib` 文件条目。
