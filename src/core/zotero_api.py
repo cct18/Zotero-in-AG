@@ -35,7 +35,7 @@ class ZoteroAPIClient:
         if not self.is_running():
             return {
                 "success": False,
-                "error": "Zotero 桌面端当前未运行。为了保证数据库安全与实时同步，请先启动 Zotero 10 客户端。",
+                "error": "Zotero 桌面端当前未运行。为了保证数据库安全与实时同步，请先启动 Zotero 客户端。",
             }
 
         # Convert simple markdown to clean HTML for Zotero notes
@@ -100,7 +100,7 @@ class ZoteroAPIClient:
         if not self.is_running():
             return {
                 "success": False,
-                "error": "Zotero 桌面端当前未运行，请先启动 Zotero 10。",
+                "error": "Zotero 桌面端当前未运行，请先启动 Zotero 客户端。",
             }
 
         payload = [{"tag": t} for t in tags]
@@ -180,9 +180,9 @@ class ZoteroAPIClient:
         # Now dispatch the selection safely
         try:
             self._open_protocol_uri(uri)
-            return {"success": True, "message": f"已成功启动 Zotero 10 并定位文献 [{item_key}]"}
+            return {"success": True, "message": f"已成功启动 Zotero 并定位文献 [{item_key}]"}
         except Exception:
-            return {"success": True, "message": "已成功启动 Zotero 10 客户端"}
+            return {"success": True, "message": "已成功启动 Zotero 客户端"}
 
     @staticmethod
     def _markdown_to_zotero_html(title: str, markdown: str) -> str:

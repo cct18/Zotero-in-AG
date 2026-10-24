@@ -223,7 +223,7 @@ def zotero_add_note(
         note_markdown=content_markdown,
     )
     if res.get("success"):
-        return f"✅ {res.get('message')}\n笔记标题: **{title}**\n已安全存入本地 Zotero 10 并即时生效。"
+        return f"✅ {res.get('message')}\n笔记标题: **{title}**\n已安全存入本地 Zotero 并在桌面端即时生效。"
     else:
         return f"❌ 保存笔记失败: {res.get('error')}"
 

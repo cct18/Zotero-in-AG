@@ -2,7 +2,7 @@
   "name": "zotero-in-ag",
   "displayName": "Zotero in AG",
   "description": "Seamlessly integrates Zotero into Antigravity with Aux Pane PDF reader, library manager, and MCP research tools.",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "logo": "assets/logo.svg",
   "suggestedPrompts": [
     "/zotero",

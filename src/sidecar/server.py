@@ -37,7 +37,6 @@ app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 import json
 import urllib.request
 import urllib.parse
-from pydantic import BaseModel
 
 class NoteCreateRequest(BaseModel):
     item_key: str

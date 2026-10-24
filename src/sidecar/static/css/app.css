@@ -547,14 +547,29 @@ body {
   display: block;
 }
 
+/* Prevent mouse drag selection from leaking into sidebars, card lists and chrome */
+.sidebar,
+.sidebar-panel,
+.collections-sidebar,
+.items-sidebar,
+.items-list,
+.item-card,
+.detail-toolbar,
+.paper-summary-head,
+.pdf-container,
+.empty-state {
+  user-select: none !important;
+  -webkit-user-select: none !important;
+}
+
 /* Text layer for precise Zotero-grade selection */
 .textLayer {
   position: absolute;
   text-align: initial;
   inset: 0;
   overflow: hidden;
-  opacity: 1 !important;
-  line-height: 1;
+  opacity: 0.28; /* PDF.js standard: smoothly blends solid selection highlight over canvas text */
+  line-height: 1 !important;
   -webkit-text-size-adjust: none;
   -moz-text-size-adjust: none;
   text-size-adjust: none;
@@ -572,14 +587,14 @@ body {
   white-space: pre;
   cursor: text;
   transform-origin: 0 0;
-  z-index: 1; /* Keep actual text spans above endOfContent */
+  line-height: 1 !important; /* Compact line-height prevents excessive vertical selection height */
+  box-sizing: border-box;
+  user-select: text;
+  -webkit-user-select: text;
+  z-index: 1; /* Sits above sentinel endOfContent */
 }
 
-.textLayer br::selection {
-  background: transparent !important;
-}
-
-/* Zotero Selection Shield: endOfContent */
+/* Sentinel endOfContent for Chromium selection bounds protection (Mozilla standard) */
 .textLayer .endOfContent {
   display: block;
   position: absolute;
@@ -592,22 +607,26 @@ body {
   -webkit-user-select: none;
   -moz-user-select: none;
   user-select: none;
-  pointer-events: none;
+  pointer-events: auto;
 }
 
 .textLayer.selecting .endOfContent {
   top: 0;
-  display: block;
 }
 
+/* Solid selection color prevents dark overlap stripes when lines touch */
 .textLayer ::selection {
-  background: rgba(137, 180, 250, 0.45) !important;
+  background: #3b82f6 !important;
   color: transparent !important;
 }
 
 [data-theme="light"] .textLayer ::selection {
-  background: rgba(59, 130, 246, 0.35) !important;
+  background: #2563eb !important;
   color: transparent !important;
+}
+
+.textLayer br::selection {
+  background: transparent !important;
 }
 
 /* Selection Action Tooltip & Zotero Marking Toolbar (Figures 1 & 2) */

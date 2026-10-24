@@ -1,7 +1,7 @@
 # Zotero in AG 插件开发与架构设计文档
 
 > **插件名称**: Zotero in AG (Zotero Literature Hub for Google Antigravity)  
-> **最新版本**: v2.0.0  
+> **最新版本**: v2.1.0  
 > **适用宿主**: Google Antigravity 2.0+ (桌面端 Electron 及 IDE 体系)  
 > **运行环境**: Python >= 3.11, Astral `uv`, Zotero (7 / 8 / 9 / 10+)  
 > **文档定位**: 插件开发者指南、系统架构设计、工程开发规范（更新日志详见 [CHANGELOG.md](CHANGELOG.md)）
@@ -159,5 +159,4 @@ zotero-in-ag/
 
 - [ ] **语义向量检索**：基于本地嵌入模型，为 Zotero 论文库构建向量索引，支持跨文献的语义概念检索。
 - [ ] **多篇论文横向对比**：在侧边栏支持多 Tab 或双栏对比模式，便于横向比对不同实验结论。
-- [ ] **BibTeX 一键导出与 LaTeX 联动**：在 Antigravity 编写论文代码时，支持由 Agent 自动补全 `.bib` 文件条目。
 - [ ] **BibTeX 一键导出与 LaTeX 联动**：在 Antigravity 编写论文代码时，支持由 Agent 自动补全 `.bib` 文件条目。
