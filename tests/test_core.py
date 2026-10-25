@@ -4,6 +4,9 @@ from pathlib import Path
 # Add project root to sys.path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from tests.fixtures.mock_zotero import ensure_mock_if_needed
+ensure_mock_if_needed()
+
 from src.core.config import get_config
 from src.core.db import ZoteroDB
 from src.core.storage import StorageResolver

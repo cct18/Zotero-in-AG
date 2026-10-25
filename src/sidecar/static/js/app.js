@@ -83,54 +83,140 @@ const state = {
   firstPageWidth: null,
 };
 
-// DOM Elements
-const collectionsListEl = document.getElementById('collectionsList');
-const itemsListEl = document.getElementById('itemsList');
-const itemsHeaderRowEl = document.getElementById('itemsHeaderRow');
-const itemsSectionHeaderEl = document.getElementById('itemsSectionHeader');
-const sortDateBtnEl = document.getElementById('sortDateBtn');
-const searchInputEl = document.getElementById('searchInput');
+// Global error boundary for UI
+window.addEventListener('error', (e) => {
+  console.error('[Sidecar Error]', e);
+  const badge = document.getElementById('statusBadge');
+  if (badge) {
+    badge.innerHTML = `<span class="status-dot" style="background:#f38ba8"></span> 脚本异常: ${escapeHtml(e.message || String(e))}`;
+  }
+});
+window.addEventListener('unhandledrejection', (e) => {
+  console.error('[Sidecar Unhandled Rejection]', e);
+  const badge = document.getElementById('statusBadge');
+  if (badge) {
+    badge.innerHTML = `<span class="status-dot" style="background:#f38ba8"></span> 异步异常: ${escapeHtml(e.reason?.message || String(e.reason))}`;
+  }
+});
+
+// Dynamic DOM Elements references to strictly prevent any null reference on early evaluation
+let collectionsListEl = null;
+let itemsListEl = null;
+let itemsHeaderRowEl = null;
+let itemsSectionHeaderEl = null;
+let sortDateBtnEl = null;
+let searchInputEl = null;
+
+let emptyStateEl = null;
+let paperViewerEl = null;
+let paperTitleEl = null;
+let paperMetaEl = null;
+let pdfContainerEl = null;
+let pageIndicatorEl = null;
+let zoomPercentEl = null;
+let selectionTooltipEl = null;
+let toastEl = null;
+let statusBadgeEl = null;
+
+function initDomElements() {
+  collectionsListEl = document.getElementById('collectionsList');
+  itemsListEl = document.getElementById('itemsList');
+  itemsHeaderRowEl = document.getElementById('itemsHeaderRow');
+  itemsSectionHeaderEl = document.getElementById('itemsSectionHeader');
+  sortDateBtnEl = document.getElementById('sortDateBtn');
+  searchInputEl = document.getElementById('searchInput');
+
+  emptyStateEl = document.getElementById('emptyState');
+  paperViewerEl = document.getElementById('paperViewer');
+  paperTitleEl = document.getElementById('paperTitle');
+  paperMetaEl = document.getElementById('paperMeta');
+  pdfContainerEl = document.getElementById('pdfContainer');
+  pageIndicatorEl = document.getElementById('pageIndicator');
+  zoomPercentEl = document.getElementById('zoomPercent');
+  selectionTooltipEl = document.getElementById('selectionTooltip');
+  toastEl = document.getElementById('toast');
+  statusBadgeEl = document.getElementById('statusBadge');
+}
+
+const getCollectionsListEl = () => collectionsListEl || document.getElementById('collectionsList');
+const getItemsListEl = () => itemsListEl || document.getElementById('itemsList');
+const getItemsHeaderRowEl = () => itemsHeaderRowEl || document.getElementById('itemsHeaderRow');
+const getItemsSectionHeaderEl = () => itemsSectionHeaderEl || document.getElementById('itemsSectionHeader');
+const getSortDateBtnEl = () => sortDateBtnEl || document.getElementById('sortDateBtn');
+const getSearchInputEl = () => searchInputEl || document.getElementById('searchInput');
+
+const getEmptyStateEl = () => emptyStateEl || document.getElementById('emptyState');
+const getPaperViewerEl = () => paperViewerEl || document.getElementById('paperViewer');
+const getPaperTitleEl = () => paperTitleEl || document.getElementById('paperTitle');
+const getPaperMetaEl = () => paperMetaEl || document.getElementById('paperMeta');
+const getPdfContainerEl = () => pdfContainerEl || document.getElementById('pdfContainer');
+const getPageIndicatorEl = () => pageIndicatorEl || document.getElementById('pageIndicator');
+const getZoomPercentEl = () => zoomPercentEl || document.getElementById('zoomPercent');
+const getSelectionTooltipEl = () => selectionTooltipEl || document.getElementById('selectionTooltip');
+const getToastEl = () => toastEl || document.getElementById('toast');
+const getStatusBadgeEl = () => statusBadgeEl || document.getElementById('statusBadge');
 
 const ICON_DATE_DESC = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m3 16 4 4 4-4"/><path d="M7 20V4"/><path d="M11 4h10"/><path d="M11 8h7"/><path d="M11 12h4"/></svg>`;
 const ICON_DATE_ASC = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m3 8 4-4 4 4"/><path d="M7 4v16"/><path d="M11 12h4"/><path d="M11 8h7"/><path d="M11 4h10"/></svg>`;
-const emptyStateEl = document.getElementById('emptyState');
-const paperViewerEl = document.getElementById('paperViewer');
-const paperTitleEl = document.getElementById('paperTitle');
-const paperMetaEl = document.getElementById('paperMeta');
-const pdfContainerEl = document.getElementById('pdfContainer');
-const pageIndicatorEl = document.getElementById('pageIndicator');
-const zoomPercentEl = document.getElementById('zoomPercent');
-const selectionTooltipEl = document.getElementById('selectionTooltip');
-const toastEl = document.getElementById('toast');
-const statusBadgeEl = document.getElementById('statusBadge');
 
-document.addEventListener('DOMContentLoaded', async () => {
-  setupEventListeners();
-  applySettings();
-  await checkHealth();
-  // Initially only load collections! Empty main area by default.
-  await loadCollections();
-});
+async function initApp() {
+  initDomElements();
+  try {
+    setupEventListeners();
+  } catch (e) {
+    console.error('setupEventListeners error:', e);
+  }
+  try {
+    applySettings();
+  } catch (e) {
+    console.error('applySettings error:', e);
+  }
+  try {
+    await checkHealth();
+  } catch (e) {
+    console.error('checkHealth error:', e);
+  }
+  try {
+    // Initially only load collections! Empty main area by default.
+    await loadCollections();
+  } catch (e) {
+    console.error('loadCollections error:', e);
+  }
+}
+
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', initApp);
+} else {
+  initApp();
+}
 
 function setupEventListeners() {
+  const searchInputEl = getSearchInputEl();
+  const sortDateBtnEl = getSortDateBtnEl();
+  const itemsHeaderRowEl = getItemsHeaderRowEl();
+  const itemsSectionHeaderEl = getItemsSectionHeaderEl();
+  const itemsListEl = getItemsListEl();
+
   // Search
   let debounceTimer;
-  searchInputEl.addEventListener('input', (e) => {
-    clearTimeout(debounceTimer);
-    debounceTimer = setTimeout(() => {
-      const q = e.target.value.trim();
-      if (q) {
-        if (itemsHeaderRowEl) itemsHeaderRowEl.style.display = 'flex';
-        itemsSectionHeaderEl.textContent = `搜索: "${q}"`;
-        loadItems(q);
-      } else if (state.selectedCollectionKey) {
-        loadItems();
-      } else {
-        itemsListEl.innerHTML = '';
-        if (itemsHeaderRowEl) itemsHeaderRowEl.style.display = 'none';
-      }
-    }, 300);
-  });
+  if (searchInputEl) {
+    searchInputEl.addEventListener('input', (e) => {
+      clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(() => {
+        const q = e.target.value.trim();
+        if (q) {
+          if (itemsHeaderRowEl) itemsHeaderRowEl.style.display = 'flex';
+          if (itemsSectionHeaderEl) itemsSectionHeaderEl.textContent = `搜索: "${q}"`;
+          loadItems(q);
+        } else if (state.selectedCollectionKey) {
+          loadItems();
+        } else {
+          if (itemsListEl) itemsListEl.innerHTML = '';
+          if (itemsHeaderRowEl) itemsHeaderRowEl.style.display = 'none';
+        }
+      }, 300);
+    });
+  }
 
   // Toggle Date Sort (Newest <-> Oldest)
   if (sortDateBtnEl) {
@@ -148,88 +234,112 @@ function setupEventListeners() {
 
       // If items reach server query limit, load from backend to get true global sorted window
       if (state.items.length >= 100) {
-        const q = searchInputEl.value.trim();
+        const q = searchInputEl ? searchInputEl.value.trim() : '';
         loadItems(q);
       }
     });
   }
 
   // Prev / Next Page Jump
-  document.getElementById('prevPageBtn').addEventListener('click', () => {
-    if (state.currentPageNum > 1) {
-      scrollToPage(state.currentPageNum - 1);
-    }
-  });
+  const prevPageBtn = document.getElementById('prevPageBtn');
+  if (prevPageBtn) {
+    prevPageBtn.addEventListener('click', () => {
+      if (state.currentPageNum > 1) {
+        scrollToPage(state.currentPageNum - 1);
+      }
+    });
+  }
 
-  document.getElementById('nextPageBtn').addEventListener('click', () => {
-    if (state.currentPageNum < state.totalPdfPages) {
-      scrollToPage(state.currentPageNum + 1);
-    }
-  });
+  const nextPageBtn = document.getElementById('nextPageBtn');
+  if (nextPageBtn) {
+    nextPageBtn.addEventListener('click', () => {
+      if (state.currentPageNum < state.totalPdfPages) {
+        scrollToPage(state.currentPageNum + 1);
+      }
+    });
+  }
 
   // Zoom Controls
-  document.getElementById('zoomInBtn').addEventListener('click', () => {
-    updateZoom(Math.min(2.5, state.scale + 0.2));
-  });
+  const zoomInBtn = document.getElementById('zoomInBtn');
+  if (zoomInBtn) {
+    zoomInBtn.addEventListener('click', () => {
+      updateZoom(Math.min(2.5, state.scale + 0.2));
+    });
+  }
 
-  document.getElementById('zoomOutBtn').addEventListener('click', () => {
-    updateZoom(Math.max(0.5, state.scale - 0.2));
-  });
+  const zoomOutBtn = document.getElementById('zoomOutBtn');
+  if (zoomOutBtn) {
+    zoomOutBtn.addEventListener('click', () => {
+      updateZoom(Math.max(0.5, state.scale - 0.2));
+    });
+  }
 
-  document.getElementById('zoomFitBtn').addEventListener('click', () => {
-    fitWidth();
-  });
+  const zoomFitBtn = document.getElementById('zoomFitBtn');
+  if (zoomFitBtn) {
+    zoomFitBtn.addEventListener('click', () => {
+      fitWidth();
+    });
+  }
 
   // Action Buttons
-  document.getElementById('askAgentBtn').addEventListener('click', () => {
-    if (!state.selectedItem) return;
-    const it = state.selectedItem;
-    const title = it.title || '（无标题）';
-    const authors = (it.creators || []).join(', ') || (it.itemType === 'attachment' ? 'PDF 独立文档' : '未知作者');
-    const year = (it.date || '').substring(0, 4) || '';
+  const askAgentBtn = document.getElementById('askAgentBtn');
+  if (askAgentBtn) {
+    askAgentBtn.addEventListener('click', () => {
+      if (!state.selectedItem) return;
+      const it = state.selectedItem;
+      const title = it.title || '（无标题）';
+      const authors = (it.creators || []).join(', ') || (it.itemType === 'attachment' ? 'PDF 独立文档' : '未知作者');
+      const year = (it.date || '').substring(0, 4) || '';
 
-    let template = (state.settings && state.settings.fullTextPrompt) || DEFAULT_SETTINGS.fullTextPrompt;
-    if (it.itemType === 'attachment' && (!state.settings || !state.settings.fullTextPrompt)) {
-      template = '请帮我深入分析文档《{title}》的核心内容、要点与关键细节。';
-    }
+      let template = (state.settings && state.settings.fullTextPrompt) || DEFAULT_SETTINGS.fullTextPrompt;
+      if (it.itemType === 'attachment' && (!state.settings || !state.settings.fullTextPrompt)) {
+        template = '请帮我深入分析文档《{title}》的核心内容、要点与关键细节。';
+      }
 
-    const prompt = template
-      .replaceAll('{title}', title)
-      .replaceAll('{authors}', authors)
-      .replaceAll('{year}', year);
+      const prompt = template
+        .replaceAll('{title}', title)
+        .replaceAll('{authors}', authors)
+        .replaceAll('{year}', year);
 
-    copyToClipboard(prompt, '已复制分析 Prompt！请直接粘贴至 Antigravity 对话框 🚀');
-  });
+      copyToClipboard(prompt, '已复制分析 Prompt！请直接粘贴至 Antigravity 对话框 🚀');
+    });
+  }
 
-  document.getElementById('copyBibtexBtn').addEventListener('click', () => {
-    if (!state.selectedItem) return;
-    const it = state.selectedItem;
-    const citeKey = it.itemKey;
-    const isAttachment = it.itemType === 'attachment';
-    const year = (it.date || '').substring(0, 4) || '';
-    const doi = it.doi || it.DOI || '';
-    const bibtex = isAttachment
-      ? `@misc{${citeKey},\n  title={${it.title || ''}}\n}`
-      : `@article{${citeKey},\n  title={${it.title || ''}},\n  author={${(it.creators || []).join(' and ')}},\n  year={${year}},\n  doi={${doi}}\n}`;
-    copyToClipboard(bibtex, '已复制 BibTeX 条目到剪贴板！');
-  });
+  const copyBibtexBtn = document.getElementById('copyBibtexBtn');
+  if (copyBibtexBtn) {
+    copyBibtexBtn.addEventListener('click', () => {
+      if (!state.selectedItem) return;
+      const it = state.selectedItem;
+      const citeKey = it.itemKey;
+      const isAttachment = it.itemType === 'attachment';
+      const year = (it.date || '').substring(0, 4) || '';
+      const doi = it.doi || it.DOI || '';
+      const bibtex = isAttachment
+        ? `@misc{${citeKey},\n  title={${it.title || ''}}\n}`
+        : `@article{${citeKey},\n  title={${it.title || ''}},\n  author={${(it.creators || []).join(' and ')}},\n  year={${year}},\n  doi={${doi}}\n}`;
+      copyToClipboard(bibtex, '已复制 BibTeX 条目到剪贴板！');
+    });
+  }
 
   // Fix: Locate in Zotero Desktop via dedicated backend endpoint
-  document.getElementById('openInZoteroBtn').addEventListener('click', async () => {
-    if (!state.selectedItem) return;
-    showToast('正在调起本地 Zotero 客户端...');
-    try {
-      const res = await fetch(`/api/locate/${state.selectedItem.itemKey}`, { method: 'POST' });
-      const data = await res.json();
-      if (data.success) {
-        showToast(data.message || '已在 Zotero 中定位该条目！');
-      } else {
-        showToast('定位失败: ' + (data.error || '未知错误'));
+  const openInZoteroBtn = document.getElementById('openInZoteroBtn');
+  if (openInZoteroBtn) {
+    openInZoteroBtn.addEventListener('click', async () => {
+      if (!state.selectedItem) return;
+      showToast('正在调起本地 Zotero 客户端...');
+      try {
+        const res = await fetch(`/api/locate/${state.selectedItem.itemKey}`, { method: 'POST' });
+        const data = await res.json();
+        if (data.success) {
+          showToast(data.message || '已在 Zotero 中定位该条目！');
+        } else {
+          showToast('定位失败: ' + (data.error || '未知错误'));
+        }
+      } catch (e) {
+        showToast('请求定位失败: ' + e.message);
       }
-    } catch (e) {
-      showToast('请求定位失败: ' + e.message);
-    }
-  });
+    });
+  }
 
   // Text Selection Tooltip & Zotero Selection Shield
   initTextSelectionShield();
@@ -297,33 +407,43 @@ function setupEventListeners() {
   }
 
   // 4. Ask Agent Vector Button
-  document.getElementById('tooltipAskBtn').addEventListener('click', () => {
-    if (!state.selectedText) return;
-    const it = state.selectedItem;
-    const title = it ? (it.title || '（无标题）') : '选中文档';
-    const template = (state.settings && state.settings.selectionPrompt) || DEFAULT_SETTINGS.selectionPrompt;
+  const tooltipAskBtn = document.getElementById('tooltipAskBtn');
+  if (tooltipAskBtn) {
+    tooltipAskBtn.addEventListener('click', () => {
+      if (!state.selectedText) return;
+      const it = state.selectedItem;
+      const title = it ? (it.title || '（无标题）') : '选中文档';
+      const template = (state.settings && state.settings.selectionPrompt) || DEFAULT_SETTINGS.selectionPrompt;
 
-    const prompt = template
-      .replaceAll('{title}', title)
-      .replaceAll('{selected_text}', state.selectedText);
+      const prompt = template
+        .replaceAll('{title}', title)
+        .replaceAll('{selected_text}', state.selectedText);
 
-    copyToClipboard(prompt, '已生成提问 Prompt 并复制到剪贴板！请直接粘贴提问。');
-    hideSelectionTooltip();
-  });
+      copyToClipboard(prompt, '已生成提问 Prompt 并复制到剪贴板！请直接粘贴提问。');
+      hideSelectionTooltip();
+    });
+  }
 
   // 5. Quote Vector Button
-  document.getElementById('tooltipCopyBtn').addEventListener('click', () => {
-    if (!state.selectedText) return;
-    const quote = `> "${state.selectedText}" ([@${state.selectedItem?.itemKey || 'Zotero'}])`;
-    copyToClipboard(quote, '已复制引用文本！');
-    hideSelectionTooltip();
-  });
+  const tooltipCopyBtn = document.getElementById('tooltipCopyBtn');
+  if (tooltipCopyBtn) {
+    tooltipCopyBtn.addEventListener('click', () => {
+      if (!state.selectedText) return;
+      const quote = `> "${state.selectedText}" ([@${state.selectedItem?.itemKey || 'Zotero'}])`;
+      copyToClipboard(quote, '已复制引用文本！');
+      hideSelectionTooltip();
+    });
+  }
 
   // Sidebar toggle button with native Antigravity layout icon
-  document.getElementById('toggleSidebarBtn').addEventListener('click', () => {
-    document.getElementById('sidebar').classList.toggle('collapsed');
-    setTimeout(fitWidth, 250);
-  });
+  const toggleSidebarBtn = document.getElementById('toggleSidebarBtn');
+  if (toggleSidebarBtn) {
+    toggleSidebarBtn.addEventListener('click', () => {
+      const sidebar = document.getElementById('sidebar');
+      if (sidebar) sidebar.classList.toggle('collapsed');
+      setTimeout(fitWidth, 250);
+    });
+  }
 
   // Settings Modal Controls
   const settingsBtn = document.getElementById('settingsBtn');
@@ -1409,6 +1529,7 @@ function saveAnnotationsToStorage(itemKey) {
 
 function deleteAnnotationOnServer(itemKey, annId) {
   if (!itemKey || !annId) return;
+  if (String(annId).startsWith('zotero_')) return;
   fetch(`/api/annotations/${encodeURIComponent(itemKey)}/${encodeURIComponent(annId)}`, {
     method: 'DELETE',
   }).catch(() => {});
@@ -1569,6 +1690,12 @@ async function applyAnnotation(color, mode) {
   // 1. Direct mark edit (opened by clicking an existing annotation)
   if (state.activeAnnotation) {
     const ann = state.activeAnnotation;
+    if (ann.source === 'zotero' || String(ann.id).startsWith('zotero_')) {
+      showToast('Zotero 原生批注为只读，请在桌面端客户端修改或删除');
+      state.activeAnnotation = null;
+      hideSelectionTooltip();
+      return;
+    }
     const pageNum = ann.pageNum || (ann.pageIndex !== undefined ? ann.pageIndex + 1 : 1);
 
     // Toggle OFF if user clicks the SAME color AND mode!
@@ -1702,6 +1829,12 @@ function clearCurrentAnnotation() {
   const removedIds = [];
 
   if (state.activeAnnotation) {
+    if (state.activeAnnotation.source === 'zotero' || String(state.activeAnnotation.id).startsWith('zotero_')) {
+      showToast('Zotero 原生批注为只读，请在桌面端客户端修改或删除');
+      state.activeAnnotation = null;
+      hideSelectionTooltip();
+      return;
+    }
     targetPageNum = state.activeAnnotation.pageNum || (state.activeAnnotation.pageIndex !== undefined ? state.activeAnnotation.pageIndex + 1 : 1);
     removedIds.push(state.activeAnnotation.id);
     state.annotations = state.annotations.filter(a => a.id !== state.activeAnnotation.id);

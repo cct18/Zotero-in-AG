@@ -1,4 +1,3 @@
-import json
 import sys
 from pathlib import Path
 from typing import Optional
@@ -9,8 +8,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 from mcp.server.mcpserver import MCPServer
 from src.core.db import ZoteroDB
 from src.core.storage import StorageResolver
-from src.core.pdf_extractor import PDFExtractor
 from src.core.zotero_api import ZoteroAPIClient
+from src.services.catalog_service import CatalogService
+from src.services.document_service import DocumentService
 
 # Initialize MCP Server
 app = MCPServer(
@@ -21,6 +21,19 @@ app = MCPServer(
 db = ZoteroDB()
 storage = StorageResolver()
 api = ZoteroAPIClient()
+catalog_service = CatalogService(db=db)
+document_service = DocumentService(db=db, storage=storage)
+
+def get_catalog_service() -> CatalogService:
+    if catalog_service.db is not db:
+        catalog_service.db = db
+    return catalog_service
+
+def get_document_service() -> DocumentService:
+    if document_service.db is not db or document_service.storage is not storage:
+        document_service.db = db
+        document_service.storage = storage
+    return document_service
 
 @app.tool()
 def zotero_search(
@@ -38,7 +51,7 @@ def zotero_search(
         tag: Optional tag name to filter items.
         limit: Maximum number of papers to return (default 10).
     """
-    items = db.get_items(
+    items = get_catalog_service().get_items(
         collection_key=collection_key or None,
         query=query or None,
         tag=tag or None,
@@ -77,7 +90,7 @@ def zotero_get_collections() -> str:
     """
     Get the complete hierarchical collections (folders) tree from the user's Zotero library.
     """
-    tree = db.get_collections_tree()
+    tree = get_catalog_service().get_collections_tree()
     if not tree:
         return "文献库中当前没有创建任何分类集合（Collections）。"
 
@@ -112,7 +125,7 @@ def zotero_get_item(item_key: str) -> str:
     Args:
         item_key: The 8-character Zotero item key (e.g., 'DQGFST6U').
     """
-    item = db.get_item_by_key(item_key)
+    item = get_catalog_service().get_item_by_key(item_key)
     if not item:
         return f"错误：未找到 Key 为 `{item_key}` 的文献条目。"
 
@@ -187,19 +200,16 @@ def zotero_read_pdf(
     if end_page - start_page > 9:
         end_page = start_page + 9
 
-    att = db.get_pdf_attachment_for_item(item_key)
+    att, pdf_path = get_document_service().resolve_pdf_for_item(item_key)
     if not att:
         return f"未找到文献 `{item_key}` 对应的本地 PDF 附件。请确认该条目是否已下载 PDF。"
 
     attach_key = att["attachmentKey"]
-    raw_path = att.get("path")
-    pdf_path = storage.resolve_pdf_path(attach_key, raw_path)
-
     if not pdf_path or not pdf_path.exists():
         return f"文献 `{item_key}` 的附件目录已找到 (`{attach_key}`)，但在磁盘上未检测到 PDF 实体文件。"
 
     try:
-        extracted = PDFExtractor.extract_text(
+        extracted = get_document_service().extract_text(
             pdf_path=pdf_path,
             start_page=start_page,
             end_page=end_page,

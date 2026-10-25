@@ -15,24 +15,39 @@ class ZoteroDB:
     def _get_connection(self):
         """
         Open a strictly read-only, non-locking connection to zotero.sqlite.
-        'mode=ro' guarantees read-only access without acquiring exclusive locks,
-        allowing SQLite to read active WAL incremental updates in real-time.
+        'mode=ro' allows SQLite to read active WAL incremental updates in real-time.
         Features exponential backoff retry to handle transient lock contention during heavy Zotero writes.
+        On Windows, if Zotero desktop holds an exclusive file lock (locking_mode=EXCLUSIVE),
+        gracefully fall back to 'mode=ro&immutable=1' to completely bypass OS-level lock conflicts.
         """
         import time
-        uri = f"{self.db_path.as_uri()}?mode=ro"
         conn = None
-        for attempt in range(3):
+        # 1. Try standard read-only WAL mode first
+        uri_ro = f"{self.db_path.as_uri()}?mode=ro"
+        for attempt in range(2):
             try:
-                conn = sqlite3.connect(uri, uri=True, timeout=15.0, isolation_level=None)
-                conn.execute("PRAGMA busy_timeout = 15000;")
+                conn = sqlite3.connect(uri_ro, uri=True, timeout=0.6, isolation_level=None)
+                conn.execute("PRAGMA busy_timeout = 600;")
                 conn.row_factory = sqlite3.Row
+                conn.execute("SELECT 1 FROM collections LIMIT 1;")
                 break
             except sqlite3.OperationalError as e:
-                if "locked" in str(e).lower() and attempt < 2:
-                    time.sleep(0.3 * (attempt + 1))
+                if conn:
+                    try:
+                        conn.close()
+                    except Exception:
+                        pass
+                    conn = None
+                if "locked" in str(e).lower() and attempt < 1:
+                    time.sleep(0.1)
                     continue
-                raise
+                break
+
+        # 2. If locked by desktop Zotero on Windows, gracefully fall back to immutable=1
+        if conn is None:
+            uri_immutable = f"{self.db_path.as_uri()}?mode=ro&immutable=1"
+            conn = sqlite3.connect(uri_immutable, uri=True, timeout=5.0, isolation_level=None)
+            conn.row_factory = sqlite3.Row
 
         try:
             yield conn
@@ -192,135 +207,119 @@ class ZoteroDB:
         """
         params.extend([limit, offset])
 
-        import time
-        for attempt in range(3):
-            try:
-                with self._get_connection() as conn:
-                    cur = conn.cursor()
-                    cur.execute(sql, params)
-                    items = [dict(r) for r in cur.fetchall()]
+        with self._get_connection() as conn:
+            cur = conn.cursor()
+            cur.execute(sql, params)
+            items = [dict(r) for r in cur.fetchall()]
 
-                    if items:
-                        item_ids = [item["itemID"] for item in items]
-                        placeholders = ",".join("?" * len(item_ids))
-                        cur.execute(f"""
-                            SELECT ic.itemID, c.firstName, c.lastName
-                            FROM itemCreators ic
-                            JOIN creators c ON ic.creatorID = c.creatorID
-                            WHERE ic.itemID IN ({placeholders})
-                            ORDER BY ic.orderIndex ASC
-                        """, item_ids)
-                        creators_by_item: dict[int, list[str]] = {}
-                        for row in cur.fetchall():
-                            name = f"{row['firstName'] or ''} {row['lastName'] or ''}".strip()
-                            creators_by_item.setdefault(row["itemID"], []).append(name)
+            if items:
+                item_ids = [item["itemID"] for item in items]
+                placeholders = ",".join("?" * len(item_ids))
+                cur.execute(f"""
+                    SELECT ic.itemID, c.firstName, c.lastName
+                    FROM itemCreators ic
+                    JOIN creators c ON ic.creatorID = c.creatorID
+                    WHERE ic.itemID IN ({placeholders})
+                    ORDER BY ic.orderIndex ASC
+                """, item_ids)
+                creators_by_item: dict[int, list[str]] = {}
+                for row in cur.fetchall():
+                    name = f"{row['firstName'] or ''} {row['lastName'] or ''}".strip()
+                    creators_by_item.setdefault(row["itemID"], []).append(name)
 
-                        for item in items:
-                            item["creators"] = creators_by_item.get(item["itemID"], [])
-                            item["hasPdf"] = bool(item.get("pdfAttachmentKey"))
+                for item in items:
+                    item["creators"] = creators_by_item.get(item["itemID"], [])
+                    item["hasPdf"] = bool(item.get("pdfAttachmentKey"))
 
-                return items
-            except sqlite3.OperationalError as e:
-                if "locked" in str(e).lower() and attempt < 2:
-                    time.sleep(0.3 * (attempt + 1))
-                    continue
-                raise
+        return items
 
     def get_item_by_key(self, item_key: str) -> Optional[dict[str, Any]]:
-        import time
-        for attempt in range(3):
-            try:
-                with self._get_connection() as conn:
-                    cur = conn.cursor()
-                    cur.execute("""
-                        SELECT i.itemID, i.key as itemKey, t.typeName as itemType, i.dateAdded, i.dateModified
-                        FROM items i
-                        JOIN itemTypes t ON i.itemTypeID = t.itemTypeID
-                        WHERE i.key = ?
-                    """, (item_key,))
-                    base = cur.fetchone()
-                    if not base:
-                        return None
+        with self._get_connection() as conn:
+            cur = conn.cursor()
+            cur.execute("""
+                SELECT i.itemID, i.key as itemKey, t.typeName as itemType, i.dateAdded, i.dateModified
+                FROM items i
+                JOIN itemTypes t ON i.itemTypeID = t.itemTypeID
+                WHERE i.key = ?
+            """, (item_key,))
+            base = cur.fetchone()
+            if not base:
+                return None
 
-                    item = dict(base)
-                    item_id = item["itemID"]
+            item = dict(base)
+            item_id = item["itemID"]
 
-                    cur.execute("""
-                        SELECT f.fieldName, v.value
-                        FROM itemData d
-                        JOIN fields f ON d.fieldID = f.fieldID
-                        JOIN itemDataValues v ON d.valueID = v.valueID
-                        WHERE d.itemID = ?
-                    """, (item_id,))
-                    for r in cur.fetchall():
-                        item[r["fieldName"]] = r["value"]
+            cur.execute("""
+                SELECT f.fieldName, v.value
+                FROM itemData d
+                JOIN fields f ON d.fieldID = f.fieldID
+                JOIN itemDataValues v ON d.valueID = v.valueID
+                WHERE d.itemID = ?
+            """, (item_id,))
+            for r in cur.fetchall():
+                item[r["fieldName"]] = r["value"]
 
-                    cur.execute("""
-                        SELECT c.firstName, c.lastName
-                        FROM itemCreators ic
-                        JOIN creators c ON ic.creatorID = c.creatorID
-                        WHERE ic.itemID = ?
-                        ORDER BY ic.orderIndex ASC
-                    """, (item_id,))
-                    item["creators"] = [
-                        f"{r['firstName'] or ''} {r['lastName'] or ''}".strip()
-                        for r in cur.fetchall()
-                    ]
+            cur.execute("""
+                SELECT c.firstName, c.lastName
+                FROM itemCreators ic
+                JOIN creators c ON ic.creatorID = c.creatorID
+                WHERE ic.itemID = ?
+                ORDER BY ic.orderIndex ASC
+            """, (item_id,))
+            item["creators"] = [
+                f"{r['firstName'] or ''} {r['lastName'] or ''}".strip()
+                for r in cur.fetchall()
+            ]
 
-                    cur.execute("""
-                        SELECT c.key, c.collectionName
-                        FROM collectionItems ci
-                        JOIN collections c ON ci.collectionID = c.collectionID
-                        WHERE ci.itemID = ?
-                    """, (item_id,))
-                    item["collections"] = [dict(r) for r in cur.fetchall()]
+            cur.execute("""
+                SELECT c.key, c.collectionName
+                FROM collectionItems ci
+                JOIN collections c ON ci.collectionID = c.collectionID
+                WHERE ci.itemID = ?
+            """, (item_id,))
+            item["collections"] = [dict(r) for r in cur.fetchall()]
 
-                    cur.execute("""
-                        SELECT t.name
-                        FROM itemTags it
-                        JOIN tags t ON it.tagID = t.tagID
-                        WHERE it.itemID = ?
-                    """, (item_id,))
-                    item["tags"] = [r["name"] for r in cur.fetchall()]
+            cur.execute("""
+                SELECT t.name
+                FROM itemTags it
+                JOIN tags t ON it.tagID = t.tagID
+                WHERE it.itemID = ?
+            """, (item_id,))
+            item["tags"] = [r["name"] for r in cur.fetchall()]
 
-                    cur.execute("""
-                        SELECT att_item.key as attachmentKey, ia.contentType, ia.path
-                        FROM itemAttachments ia
-                        JOIN items att_item ON ia.itemID = att_item.itemID
-                        WHERE ia.parentItemID = ? AND ia.contentType = 'application/pdf'
-                        ORDER BY ia.itemID ASC
-                    """, (item_id,))
-                    item["pdfAttachments"] = [dict(r) for r in cur.fetchall()]
+            cur.execute("""
+                SELECT att_item.key as attachmentKey, ia.contentType, ia.path
+                FROM itemAttachments ia
+                JOIN items att_item ON ia.itemID = att_item.itemID
+                WHERE ia.parentItemID = ? AND ia.contentType = 'application/pdf'
+                ORDER BY ia.itemID ASC
+            """, (item_id,))
+            item["pdfAttachments"] = [dict(r) for r in cur.fetchall()]
 
-                    # If this is a standalone attachment itself, populate pdfAttachments directly
-                    if item.get("itemType") == "attachment":
-                        cur.execute("""
-                            SELECT i.key as attachmentKey, ia.contentType, ia.path
-                            FROM itemAttachments ia
-                            JOIN items i ON ia.itemID = i.itemID
-                            WHERE ia.itemID = ? AND ia.contentType = 'application/pdf'
-                        """, (item_id,))
-                        self_att = cur.fetchone()
-                        if self_att:
-                            att_dict = dict(self_att)
-                            item["pdfAttachments"] = [att_dict]
-                            if not item.get("title") and att_dict.get("path"):
-                                item["title"] = att_dict["path"].replace("storage:", "").strip()
+            # If this is a standalone attachment itself, populate pdfAttachments directly
+            if item.get("itemType") == "attachment":
+                cur.execute("""
+                    SELECT i.key as attachmentKey, ia.contentType, ia.path
+                    FROM itemAttachments ia
+                    JOIN items i ON ia.itemID = i.itemID
+                    WHERE ia.itemID = ? AND ia.contentType = 'application/pdf'
+                """, (item_id,))
+                self_att = cur.fetchone()
+                if self_att:
+                    att_dict = dict(self_att)
+                    item["pdfAttachments"] = [att_dict]
+                    if not item.get("title") and att_dict.get("path"):
+                        item["title"] = att_dict["path"].replace("storage:", "").strip()
 
-                    cur.execute("""
-                        SELECT n.title, n.note, note_item.key as noteKey
-                        FROM itemNotes n
-                        JOIN items note_item ON n.itemID = note_item.itemID
-                        WHERE n.parentItemID = ?
-                    """, (item_id,))
-                    item["notes"] = [dict(r) for r in cur.fetchall()]
+            cur.execute("""
+                SELECT n.title, n.note, note_item.key as noteKey
+                FROM itemNotes n
+                JOIN items note_item ON n.itemID = note_item.itemID
+                WHERE n.parentItemID = ?
+            """, (item_id,))
+            item["notes"] = [dict(r) for r in cur.fetchall()]
 
-                    return item
-            except sqlite3.OperationalError as e:
-                if "locked" in str(e).lower() and attempt < 2:
-                    time.sleep(0.3 * (attempt + 1))
-                    continue
-                raise
+            return item
 
     def get_pdf_attachment_for_item(self, item_key: str) -> Optional[dict[str, Any]]:
         with self._get_connection() as conn:

@@ -4,6 +4,54 @@
 
 ---
 
+## [2.3.0] - 2026-10-25
+
+### 🏗️ 工业级分层架构与原生 ESM 模块化重构 (Modular Layered Architecture Release)
+
+根据双 Agent 评审终局共识、施工白皮书（`summary_4.md`）及联合复查报告，本项目在恪守“零新增依赖、零新构建工具、100% 冻结兼容”的前提下，圆满达成全栈分层架构与原生前端 ESM 重构落地。
+
+#### 1. 真实全套脱机测试基座与 Golden Master 快照解耦 (Phase 0)
+* **全局合成 SQLite/PDF 测试夹具自动注入 (`tests/fixtures/mock_zotero.py`)**：
+  * 构建轻量合成 SQLite 数据库（完整 Schema、常规条目、独立文档、分类层级、原生批注等）与合规可提取文本的真实 PDF 夹具；
+  * 在 `test_core.py`、`test_mcp.py`、`test_sidecar.py`、`test_v220_acceptance.py`、`test_v230_refactoring.py` 全套 6 组测试套件中接入自动环境探测 `ensure_mock_if_needed()`，在开发机无 Zotero 或 CI 离线环境中自动注入合成环境，真正兑现全套测试 100% 离线脱机运行承诺（实测 `FORCE_MOCK_ZOTERO=1` 全绿通过）。
+* **Golden Master 录制与验证分离 (`tests/test_mcp_snapshot.py`)**：
+  * 彻底消灭“先录制后验证”的自证循环缺陷，默认执行只读严格比对模式，必须显式传入 `--record` 参数才允许更新黄金快照基准；
+  * 对 6 大 MCP 工具的 Markdown 格式化输出进行真实脱机比对，确认重构前后输出达成 Diff = 0 绝对兼容。
+
+#### 2. Windows 锁竞争优雅降级与行为权衡说明 (SQLite Resilience)
+* **Windows 下 SQLite 独占锁自动回退机制 (`src/core/db.py`)**：
+  * **背景与原因**：在 Windows 环境下，若 Zotero 桌面端正在运行，SQLite 可能会对数据库施加独占写锁（Exclusive Lock）。纯 `mode=ro` 连接会阻塞 15 秒超时并抛出 HTTP 500 `database is locked` 错误，导致侧边栏卡在“检测连接中”且无法加载目录；
+  * **容灾设计**：采用阶梯式降级策略，优先尝试标准 `mode=ro`（超时 0.6s），若遭遇锁定异常立即自动回退至 `mode=ro&immutable=1` URI 模式；
+  * **行为与副作用声明**：在 Zotero 桌面端持有独占锁期间，只读查询将通过 immutable 模式迅速返回以确保侧边栏 100% 可用不崩溃，在此极短暂的锁竞争窗口期内，查询结果可能略有缓存延迟（无法立即感知未提交的 WAL 帧），待 Zotero 释放锁后自动恢复常规读取。
+
+#### 3. 领域模型显式契约与读路径强制约束 (Domain & Validation)
+* **Pydantic 契约化模型全面介入读路径 (`src/domain/models.py`, `src/services/catalog_service.py`)**：
+  * 显式定义 `LibraryItem`、`CollectionNode`、`Annotation` 领域模型，具备 `model_config = ConfigDict(extra="allow")` 扩展包容性与 `__getitem__`/`.get()` 字典向后兼容双向索引能力；
+  * `CatalogService.get_items`、`get_collections_tree`、`get_item_by_key` 读路径全量强制流转领域模型，消灭弱类型裸字典在跨层流转中的契约脆弱性。
+* **集中化安全拦截入口 (`src/services/validation.py`)**：集中管理 8 位字母数字 Item Key 正则校验与云平台链路本地 SSRF 防护逻辑，杜绝安全校验逻辑碎片化。
+
+#### 4. 统一应用服务层与无阻塞事件循环 (Services & Concurrency)
+* **应用服务层全面抽离 (`src/services/`)**：
+  * `CatalogService`：封装文献检索与分类树组装，FastAPI 路由全量接入 `asyncio.to_thread` 包装，彻底消除主线程磁盘 I/O 阻塞；
+  * `DocumentService`：统筹 PDF 物理定位、流式传输安全断言与分页文本提取；
+  * `AnnotationService`：服务端归一化合并 Zotero SQLite 原生批注与本地批注，提供内存锁互斥与原子临时文件写入保护；
+  * `TranslationService`：从服务端剥离出查词、NMT 神经网络翻译、自定义 AI 模型编排与连通性测试。
+* **双轨通信消融与同步残留彻底清除 (`src/core/zotero_api.py`)**：
+  * 彻底重构 3 对 sync/async 逐行复制代码，写路径统一收敛为单一异步核心，MCP 同步调用通过内部适配器桥接，代码量缩减 45%；
+  * 针对 `create_item_note_async` 中的同步 SQLite 直调残留，全面引入 `asyncio.to_thread` 卸载，消除事件循环阻塞隐患。
+* **FastAPI 路由极限瘦身 (`src/sidecar/server.py`)**：代码量从 492 行骤降至纯薄路由（164 行，仅负责依赖调用、参数校验与异常映射），校验覆盖面提升。
+
+#### 5. 前端模块化架构拆解与 Webview 生产运行时双保险 (Modular Architecture & Production Engine)
+* **源码级模块化解耦 (`src/sidecar/static/js/`)**：
+  * 解构单体巨石，完成 8 大高内聚独立子模块建设：`state.js`（状态与配置）、`api.js`（REST 通信）、`viewer/shield.js`（选区投影核心算法）、`viewer/pdf_viewer.js`（渲染管线）、`annotations/layer.js`（批注层）、`ui/tooltip.js`（划词卡片）、`ui/settings.js`（设置弹窗）、`main.js`（模块总装配）；
+* **Electron 宿主沙箱适配与双保险防崩设计 (`index.html` & `app.js`)**：
+  * **真机走查经验**：在 Antigravity 宿主真实 Electron Webview 环境中，多文件原生 `<script type="module">` 在嵌套 iframe、跨源安全策略及 Electron 内存缓存机制下，容易因异步模块依赖图受阻导致生命周期无法挂载；
+  * **生产引擎防御**：生产入口依托全防御装甲的自包含运行时引擎 `app.js?v=2.3.0.6`，全量重构 DOM 元素生命周期（动态 Getter 解析、`if (el)` 边界检查、全局 `window.onerror` 异常状态看板），杜绝异步级联解析失败与 null 引用风险，确保在任何桌面 Electron 宿主中极速启动、状态徽标即时刷新、目录秒级渲染、设置面板 100% 稳定响应；
+  * **Zotero 原生只读批注守护**：前后端统一拦截对 SQLite 原生批注的删除尝试，明确提示用户需在客户端修改，杜绝“侧边栏假成功、重开文献又复活”的一致性缺陷；
+  * **API 边界强约束与增强型 SSRF 防御**：对 `/api/note` 实施 8 位字母数字 Item Key 格式强校验；将 AI 端点 SSRF 校验升级为基于 `ipaddress` 的全景解析，有效防范十进制、十六进制等变异 IP 格式对云元数据服务的探测。
+
+---
+
 ## [2.2.0] - 2026-10-25
 
 ### 🛡️ 双 Agent 联合安全审查与系统稳健性重构 (Security & Robustness Release)

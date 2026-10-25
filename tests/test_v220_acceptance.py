@@ -4,6 +4,9 @@ from fastapi.testclient import TestClient
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from tests.fixtures.mock_zotero import ensure_mock_if_needed
+ensure_mock_if_needed()
+
 from src.sidecar.server import app
 from src.core.storage import StorageResolver
 from src.core.pdf_extractor import PDFExtractor

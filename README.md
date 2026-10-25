@@ -37,8 +37,8 @@
      - **外观**：支持白天/黑夜模式、5 种个性化强调色（边框高亮联动反馈）与 PDF 护眼暖黄/暗调反色阅览底色；
      - **提示词**：支持自由配置整文 Ask 与划词 Ask 的 Agent 提示词模板（支持 `{title}`、`{authors}`、`{year}`、`{selected_text}` 动态插槽）；
      - **翻译**：支持在免配置引擎与自定义 AI 模型间一键切换，自定义 Base URL、API Key、Model 及专属学术翻译 System Prompt，支持一键连通性测试。
-6. **无锁高可用引擎 (Zero File Locks)**
-   - 采用 `?mode=ro&immutable=1` 只读无锁连接与毫秒级连接释放机制。
+6. **无锁高可用引擎 (Zero File Locks & WAL Real-time Sync)**
+   - 采用 `?mode=ro` 只读连接、WAL 实时感知与退避重试机制。
    - 即使在 Windows 严格文件锁机制下，也能与 Zotero 桌面端并发共存，绝不阻塞 Zotero 启动。
 7. **基于 `uv` 的极速现代后端 (Zero-Config)**
    - 依赖声明于 `pyproject.toml`，由 Rust 驱动的 `uv` 跨平台秒级就绪。
@@ -69,9 +69,11 @@ zotero-in-ag/
 │   └── zotero-pane/
 │       └── sidecar.json           # 声明 Auxiliary Pane 右侧副面板视图
 ├── src/
-│   ├── core/                      # 核心数据访问层 (SQLite 无锁驱动, Storage, API)
-│   ├── mcp_server/                # MCP 工具实现 (search, read_pdf, add_note 等)
-│   └── sidecar/                   # FastAPI Web 服务与 Webview 前端
+│   ├── domain/                    # 领域契约模型 (LibraryItem, Annotation 等 Pydantic 模型)
+│   ├── services/                  # 统一应用服务层 (Catalog, Document, Annotation, Translation)
+│   ├── core/                      # 底层驱动与基础设施 (SQLite, Storage, API)
+│   ├── mcp_server/                # MCP 工具协议层 (search, read_pdf, add_note 等)
+│   └── sidecar/                   # FastAPI Web 服务与原生 ES Modules 前端
 │       └── static/                # 侧边栏前端界面与本地离线 PDF.js 资源
 └── tests/                         # 自动化集成测试套件
 ```

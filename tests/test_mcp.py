@@ -3,6 +3,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from tests.fixtures.mock_zotero import ensure_mock_if_needed
+ensure_mock_if_needed()
+
 from src.mcp_server.server import (
     zotero_search,
     zotero_get_collections,
