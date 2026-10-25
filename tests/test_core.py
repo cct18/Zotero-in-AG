@@ -57,6 +57,26 @@ def test_pdf_resolution_and_text():
     print("  Snippet:\n" + extracted["content"][:300] + "...")
     assert extracted["total_chars"] > 0
 
+    # Test out-of-bounds page handling
+    oob = PDFExtractor.extract_text(pdf_path, start_page=99999, end_page=100000)
+    assert oob["extracted_pages_count"] == 0
+    assert "页码越界" in oob["content"]
+    print("  Out-of-bounds page extraction verified correctly.")
+
+    # Test path traversal prevention in StorageResolver
+    assert resolver.resolve_pdf_path("..%5Cbad") is None
+    assert resolver.resolve_pdf_path("../../../etc/passwd") is None
+    assert resolver.resolve_pdf_path("INVALID_KEY_LENGTH") is None
+    print("  StorageResolver path traversal defense verified.")
+
+def test_markdown_escaping():
+    client = ZoteroAPIClient()
+    html = client._markdown_to_zotero_html("Test <script>", "Line 1 <tag> & symbols\n- Item with <b>bold</b>")
+    assert "&lt;script&gt;" in html
+    assert "&lt;tag&gt;" in html
+    assert "&amp;" in html
+    print("\n[API] Markdown HTML entity escaping verified successfully.")
+
 def test_zotero_api():
     client = ZoteroAPIClient()
     running = client.is_running()
@@ -90,5 +110,6 @@ if __name__ == "__main__":
     test_db_items()
     test_standalone_pdf_and_sorting()
     test_pdf_resolution_and_text()
+    test_markdown_escaping()
     test_zotero_api()
     print("\n>>> ALL CORE TESTS PASSED SUCCESSFULLY! <<<")

@@ -83,14 +83,23 @@ def zotero_get_collections() -> str:
 
     lines = ["### Zotero 文献分类树结构：\n"]
 
-    def render_node(node: dict, indent: int = 0):
+    def render_node(node: dict, indent: int = 0, visited: Optional[set[str]] = None):
+        if visited is None:
+            visited = set()
+        key = node.get("key", "")
+        if (key and key in visited) or indent > 15:
+            return
+        if key:
+            visited.add(key)
+
         prefix = "  " * indent + "- "
         lines.append(f"{prefix}📁 **{node['name']}** (Key: `{node['key']}`)")
         for child in node.get("children", []):
-            render_node(child, indent + 1)
+            render_node(child, indent + 1, visited)
 
+    visited_nodes: set[str] = set()
     for root_node in tree:
-        render_node(root_node, 0)
+        render_node(root_node, 0, visited_nodes)
 
     lines.append("\n> 提示：可以在 `zotero_search` 中传入 `collection_key` 来限定检索范围。")
     return "\n".join(lines)
@@ -144,9 +153,17 @@ def zotero_get_item(item_key: str) -> str:
 
     if notes:
         lines.append(f"\n## 现有笔记 ({len(notes)} 条)")
+        import re
         for n in notes:
-            lines.append(f"### 笔记: {n.get('title') or '未命名'}")
-            lines.append(n.get("note", ""))
+            note_title = n.get("title") or "未命名"
+            raw_note = n.get("note", "")
+            # Clean HTML tags to plain text summary and prevent LLM context explosion
+            clean_note = re.sub(r"<[^>]+>", " ", raw_note)
+            clean_note = re.sub(r"\s+", " ", clean_note).strip()
+            if len(clean_note) > 400:
+                clean_note = clean_note[:400] + "... [笔记已截断以保护上下文]"
+            lines.append(f"### 笔记: {note_title}")
+            lines.append(clean_note if clean_note else "（空笔记）")
 
     return "\n".join(lines)
 

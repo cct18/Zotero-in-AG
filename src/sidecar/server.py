@@ -1,7 +1,13 @@
 import os
 import sys
+import re
+import json
+import asyncio
+import tempfile
+import logging
 from pathlib import Path
 from typing import Optional
+import httpx
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -18,13 +24,13 @@ from src.core.config import get_config
 
 app = FastAPI(title="Zotero Antigravity Sidecar Hub")
 
-# Enable CORS for local iframe/webview interactions
+# Enable CORS restricted strictly to Antigravity webviews and local loopback origins
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origin_regex=r"^https?://(127\.0\.0\.1|localhost)(:\d+)?$|^vscode-webview://.*",
+    allow_credentials=False,
+    allow_methods=["GET", "POST", "DELETE"],
+    allow_headers=["Content-Type", "Authorization"],
 )
 
 db = ZoteroDB()
@@ -33,10 +39,6 @@ api = ZoteroAPIClient()
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
-
-import json
-import urllib.request
-import urllib.parse
 
 class NoteCreateRequest(BaseModel):
     item_key: str
@@ -66,23 +68,64 @@ class AnnotationCreateRequest(BaseModel):
     rects: list[dict[str, float]]
     createdAt: Optional[int] = None
 
-ANNOTATIONS_CACHE_FILE = Path(__file__).resolve().parent / "annotations_cache.json"
+_cache_lock = asyncio.Lock()
 
-def _load_cached_annotations() -> dict[str, list[dict]]:
-    if ANNOTATIONS_CACHE_FILE.exists():
+def _get_cache_file() -> Path:
+    env_cache = os.environ.get("ZOTERO_IN_AG_CACHE_FILE")
+    if env_cache:
+        return Path(env_cache)
+    gemini_dir = Path.home() / ".gemini" / "antigravity"
+    if gemini_dir.exists():
+        return gemini_dir / "zotero_annotations_cache.json"
+    return Path.home() / ".zotero_in_ag_annotations.json"
+
+def _load_cached_annotations_unlocked() -> dict[str, list[dict]]:
+    cache_file = _get_cache_file()
+    if cache_file.exists():
         try:
-            with open(ANNOTATIONS_CACHE_FILE, "r", encoding="utf-8") as f:
+            with open(cache_file, "r", encoding="utf-8") as f:
                 return json.load(f)
-        except Exception:
+        except Exception as e:
+            logging.warning(f"Failed to read annotations cache: {e}")
             return {}
     return {}
 
-def _save_cached_annotations(data: dict[str, list[dict]]) -> None:
+def _save_cached_annotations_unlocked(data: dict[str, list[dict]]) -> bool:
+    cache_file = _get_cache_file()
     try:
-        with open(ANNOTATIONS_CACHE_FILE, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
-    except Exception:
-        pass
+        cache_file.parent.mkdir(parents=True, exist_ok=True)
+        with tempfile.NamedTemporaryFile("w", dir=str(cache_file.parent), delete=False, encoding="utf-8") as tf:
+            json.dump(data, tf, ensure_ascii=False, indent=2)
+            temp_name = tf.name
+        os.replace(temp_name, cache_file)
+        return True
+    except Exception as e:
+        logging.error(f"Failed to persist annotations cache to {cache_file}: {e}")
+        return False
+
+async def _get_cached_annotations_for_item(item_key: str) -> list[dict]:
+    async with _cache_lock:
+        return _load_cached_annotations_unlocked().get(item_key, [])
+
+async def _save_annotation_atomic(item_key: str, ann_dict: dict) -> dict:
+    async with _cache_lock:
+        all_cached = _load_cached_annotations_unlocked()
+        item_list = all_cached.setdefault(item_key, [])
+        existing_idx = next((i for i, x in enumerate(item_list) if x.get("id") == ann_dict.get("id")), -1)
+        if existing_idx >= 0:
+            item_list[existing_idx] = ann_dict
+        else:
+            item_list.append(ann_dict)
+        _save_cached_annotations_unlocked(all_cached)
+        return ann_dict
+
+async def _delete_annotation_atomic(item_key: str, annotation_id: str) -> bool:
+    async with _cache_lock:
+        all_cached = _load_cached_annotations_unlocked()
+        if item_key in all_cached:
+            all_cached[item_key] = [x for x in all_cached[item_key] if x.get("id") != annotation_id]
+            _save_cached_annotations_unlocked(all_cached)
+        return True
 
 @app.get("/", response_class=HTMLResponse)
 async def serve_index():
@@ -101,9 +144,10 @@ async def serve_index():
 @app.get("/api/health")
 async def get_health():
     cfg = get_config()
+    zotero_running = await api.is_running_async()
     return {
         "status": "ok",
-        "zotero_running": api.is_running(),
+        "zotero_running": zotero_running,
         "data_dir": str(cfg.data_dir),
         "db_exists": cfg.sqlite_path.exists(),
         "storage_exists": cfg.storage_path.exists(),
@@ -148,6 +192,9 @@ async def get_item_detail(item_key: str):
 
 @app.get("/api/pdf/{attachment_key}")
 async def get_pdf_file(attachment_key: str):
+    if not attachment_key or not re.match(r"^[A-Za-z0-9]{8}$", attachment_key):
+        raise HTTPException(status_code=400, detail="Invalid attachment key format")
+
     # Try resolving PDF file from storage/<attachment_key>
     pdf_path = storage.resolve_pdf_path(attachment_key)
     if not pdf_path or not pdf_path.exists():
@@ -167,11 +214,11 @@ async def get_pdf_file(attachment_key: str):
 
 @app.post("/api/locate/{item_key}")
 async def locate_item(item_key: str):
-    return api.locate_item_in_zotero(item_key)
+    return await api.locate_item_in_zotero_async(item_key)
 
 @app.post("/api/note")
 async def create_note(req: NoteCreateRequest):
-    res = api.create_item_note(
+    res = await api.create_item_note_async(
         parent_item_key=req.item_key,
         note_title=req.title,
         note_markdown=req.content,
@@ -180,9 +227,20 @@ async def create_note(req: NoteCreateRequest):
     return res
 
 def normalize_chat_endpoint(base_url: str) -> str:
+    import urllib.parse
     url = (base_url or "").strip().rstrip('/')
     if not url:
         return "https://api.deepseek.com/v1/chat/completions"
+
+    parsed = urllib.parse.urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        raise ValueError(f"不支持的协议 '{parsed.scheme}'，仅支持 http:// 或 https://")
+
+    hostname = (parsed.hostname or "").lower()
+    # 防范云端元数据窃取 (AWS/GCP/Azure link-local metadata 169.254.x.x)
+    if hostname.startswith("169.254.") or hostname in ("metadata.google.internal", "instance-data"):
+        raise ValueError("禁止访问链路本地/云平台元数据地址 (Link-local metadata)")
+
     if url.endswith("/chat/completions"):
         return url
     if url.endswith("/v1"):
@@ -199,7 +257,7 @@ async def execute_translation(req_data: TranslateRequest) -> dict:
        - Words: Youdao dictionary (ec + web_trans) with phonetics.
        - Sentences: Youdao AI Neural Machine Translation with Google fallback.
     """
-    import re
+    import urllib.parse
     cleaned = re.sub(r'(\w+)-\s*\n\s*(\w+)', r'\1\2', req_data.text)
     cleaned = re.sub(r'\s+', ' ', cleaned).strip()
     if not cleaned:
@@ -216,29 +274,27 @@ async def execute_translation(req_data: TranslateRequest) -> dict:
     if is_short:
         try:
             url = f"https://dict.youdao.com/jsonapi?q={urllib.parse.quote(cleaned)}"
-            req = urllib.request.Request(
-                url,
-                headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
-            )
-            with urllib.request.urlopen(req, timeout=3.0) as resp:
-                data = json.loads(resp.read().decode("utf-8"))
-                ec = data.get("ec", {})
-                w_list = ec.get("word", [])
-                if w_list:
-                    w = w_list[0]
-                    usphone = w.get("usphone") or ""
-                    ukphone = w.get("ukphone") or ""
-                    for tr in w.get("trs", []):
-                        explain = tr.get("tr", [{}])[0].get("l", {}).get("i", [""])[0]
-                        if explain:
-                            trs_list.append(explain)
+            async with httpx.AsyncClient(timeout=3.0, trust_env=False) as client:
+                resp = await client.get(url, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"})
+                if resp.status_code == 200:
+                    data = resp.json()
+                    ec = data.get("ec", {})
+                    w_list = ec.get("word", [])
+                    if w_list:
+                        w = w_list[0]
+                        usphone = w.get("usphone") or ""
+                        ukphone = w.get("ukphone") or ""
+                        for tr in w.get("trs", []):
+                            explain = tr.get("tr", [{}])[0].get("l", {}).get("i", [""])[0]
+                            if explain:
+                                trs_list.append(explain)
 
-                if not trs_list and "web_trans" in data:
-                    for item in data["web_trans"].get("web-translation", []):
-                        vals = [x.get("value") for x in item.get("trans", []) if x.get("value")]
-                        k = item.get("key")
-                        if vals:
-                            trs_list.append(f"{k}: {', '.join(vals[:3])}")
+                    if not trs_list and "web_trans" in data:
+                        for item in data["web_trans"].get("web-translation", []):
+                            vals = [x.get("value") for x in item.get("trans", []) if x.get("value")]
+                            k = item.get("key")
+                            if vals:
+                                trs_list.append(f"{k}: {', '.join(vals[:3])}")
         except Exception:
             pass
 
@@ -260,24 +316,25 @@ async def execute_translation(req_data: TranslateRequest) -> dict:
                 ],
                 "temperature": 0.3
             }
-            ai_data = json.dumps(ai_payload).encode("utf-8")
-            ai_req = urllib.request.Request(ai_url, data=ai_data, headers=headers)
-            with urllib.request.urlopen(ai_req, timeout=12.0) as resp:
-                res_json = json.loads(resp.read().decode("utf-8"))
-                ai_text = res_json["choices"][0]["message"]["content"].strip()
-                if ai_text:
-                    # If we had dictionary definitions for a single word, append AI academic translation
-                    full_text = ai_text
-                    if trs_list and len(trs_list) <= 3:
-                        full_text = f"【AI 译文】\n{ai_text}\n\n【词典释义】\n" + "\n".join(trs_list)
-                    return {
-                        "success": True,
-                        "query": cleaned,
-                        "is_word": is_short,
-                        "usphone": usphone,
-                        "ukphone": ukphone,
-                        "translation": full_text,
-                    }
+            async with httpx.AsyncClient(timeout=12.0, trust_env=False) as client:
+                resp = await client.post(ai_url, json=ai_payload, headers=headers)
+                if resp.status_code == 200:
+                    res_json = resp.json()
+                    ai_text = res_json["choices"][0]["message"]["content"].strip()
+                    if ai_text:
+                        full_text = ai_text
+                        if trs_list and len(trs_list) <= 3:
+                            full_text = f"【AI 译文】\n{ai_text}\n\n【词典释义】\n" + "\n".join(trs_list)
+                        return {
+                            "success": True,
+                            "query": cleaned,
+                            "is_word": is_short,
+                            "usphone": usphone,
+                            "ukphone": ukphone,
+                            "translation": full_text,
+                        }
+                else:
+                    return {"success": False, "error": f"自定义 AI 服务返回异常: HTTP {resp.status_code}"}
         except Exception as e:
             return {"success": False, "error": f"自定义 AI 模型调用失败: {str(e)}"}
 
@@ -294,72 +351,49 @@ async def execute_translation(req_data: TranslateRequest) -> dict:
 
     # Sentence / paragraph translation via Youdao AI Neural Machine Translation
     try:
-        post_data = urllib.parse.urlencode({
-            "q": cleaned,
-            "from": "Auto",
-            "to": "zh-CHS"
-        }).encode("utf-8")
-        req = urllib.request.Request(
-            "https://aidemo.youdao.com/trans",
-            data=post_data,
-            headers={
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
-                "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
-                "Referer": "https://ai.youdao.com/",
-            }
-        )
-        with urllib.request.urlopen(req, timeout=4.0) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
-            trans = data.get("translation")
-            if trans and isinstance(trans, list):
-                res_text = "".join(trans).strip()
-                if res_text:
-                    return {
-                        "success": True,
-                        "query": cleaned,
-                        "is_word": False,
-                        "translation": res_text,
-                    }
+        async with httpx.AsyncClient(timeout=4.0, trust_env=False) as client:
+            resp = await client.post(
+                "https://aidemo.youdao.com/trans",
+                data={"q": cleaned, "from": "Auto", "to": "zh-CHS"},
+                headers={
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+                    "Referer": "https://ai.youdao.com/",
+                }
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                trans = data.get("translation")
+                if trans and isinstance(trans, list):
+                    res_text = "".join(trans).strip()
+                    if res_text:
+                        return {
+                            "success": True,
+                            "query": cleaned,
+                            "is_word": False,
+                            "translation": res_text,
+                        }
     except Exception:
         pass
 
     # Google Translate fallback
     try:
-        url = "https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=zh-CN&dt=t&q=" + urllib.parse.quote(cleaned)
-        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"})
-        with urllib.request.urlopen(req, timeout=2.5) as resp:
-            res = json.loads(resp.read().decode("utf-8"))
-            trans = "".join([part[0] for part in res[0] if part[0]]).strip()
-            if trans:
-                return {
-                    "success": True,
-                    "query": cleaned,
-                    "is_word": False,
-                    "translation": trans,
-                }
+        url = f"https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=zh-CN&dt=t&q={urllib.parse.quote(cleaned)}"
+        async with httpx.AsyncClient(timeout=2.5, trust_env=False) as client:
+            resp = await client.get(url, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"})
+            if resp.status_code == 200:
+                res = resp.json()
+                trans = "".join([part[0] for part in res[0] if part[0]]).strip()
+                if trans:
+                    return {
+                        "success": True,
+                        "query": cleaned,
+                        "is_word": False,
+                        "translation": trans,
+                    }
     except Exception:
         pass
 
     return {"success": False, "error": "未能获取到释义，请检查网络或稍后重试"}
-
-@app.get("/api/translate")
-async def translate_text_get(
-    text: str = Query(...),
-    engine: str = Query("builtin"),
-    api_base: Optional[str] = Query(None),
-    api_key: Optional[str] = Query(None),
-    model: Optional[str] = Query(None),
-    prompt: Optional[str] = Query(None),
-):
-    req = TranslateRequest(
-        text=text,
-        engine=engine,
-        api_base=api_base,
-        api_key=api_key,
-        model=model,
-        prompt=prompt,
-    )
-    return await execute_translation(req)
 
 @app.post("/api/translate")
 async def translate_text_post(req: TranslateRequest):
@@ -381,11 +415,12 @@ async def test_ai_model(req: TestAiRequest):
             "messages": [{"role": "user", "content": "hi"}],
             "max_tokens": 5
         }
-        data = json.dumps(payload).encode("utf-8")
-        request = urllib.request.Request(url, data=data, headers=headers)
-        with urllib.request.urlopen(request, timeout=8.0) as resp:
-            res = json.loads(resp.read().decode("utf-8"))
-            return {"success": True, "model": req.model or "deepseek-chat"}
+        async with httpx.AsyncClient(timeout=8.0, trust_env=False) as client:
+            resp = await client.post(url, json=payload, headers=headers)
+            if resp.status_code == 200:
+                return {"success": True, "model": req.model or "deepseek-chat"}
+            else:
+                return {"success": False, "error": f"HTTP {resp.status_code}: {resp.text[:100]}"}
     except Exception as e:
         return {"success": False, "error": str(e)}
 
@@ -420,8 +455,8 @@ async def get_annotations(item_key: str):
     except Exception:
         pass
 
-    # 2. Load from local cache
-    cached = _load_cached_annotations().get(item_key, [])
+    # 2. Load from local cache safely under lock
+    cached = await _get_cached_annotations_for_item(item_key)
 
     return {
         "success": True,
@@ -432,31 +467,24 @@ async def get_annotations(item_key: str):
 
 @app.post("/api/annotations/{item_key}")
 async def save_annotation(item_key: str, ann: AnnotationCreateRequest):
-    all_cached = _load_cached_annotations()
-    item_list = all_cached.setdefault(item_key, [])
-    # Check if existing id
-    existing_idx = next((i for i, x in enumerate(item_list) if x.get("id") == ann.id), -1)
-    ann_dict = ann.model_dump()
-    if existing_idx >= 0:
-        item_list[existing_idx] = ann_dict
-    else:
-        item_list.append(ann_dict)
-    _save_cached_annotations(all_cached)
-    return {"success": True, "annotation": ann_dict}
+    saved = await _save_annotation_atomic(item_key, ann.model_dump())
+    return {"success": True, "annotation": saved}
 
 @app.delete("/api/annotations/{item_key}/{annotation_id}")
 async def delete_annotation(item_key: str, annotation_id: str):
-    all_cached = _load_cached_annotations()
-    if item_key in all_cached:
-        all_cached[item_key] = [x for x in all_cached[item_key] if x.get("id") != annotation_id]
-        _save_cached_annotations(all_cached)
+    await _delete_annotation_atomic(item_key, annotation_id)
     return {"success": True}
 
 def run_server(port: int = 23180):
     import uvicorn
     # If environment variable ANTIGRAVITY_SIDECAR_WEB_PORT is passed, use it!
     env_port = os.environ.get("ANTIGRAVITY_SIDECAR_WEB_PORT")
-    actual_port = int(env_port) if env_port else port
+    actual_port = port
+    if env_port:
+        try:
+            actual_port = int(env_port)
+        except ValueError:
+            actual_port = port
     print(f"Starting Zotero Sidecar Hub on http://127.0.0.1:{actual_port}")
     uvicorn.run(app, host="127.0.0.1", port=actual_port, log_level="info")
 

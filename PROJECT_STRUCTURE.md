@@ -1,7 +1,7 @@
 # Zotero in AG 插件开发与架构设计文档
 
 > **插件名称**: Zotero in AG (Zotero Literature Hub for Google Antigravity)  
-> **最新版本**: v2.1.0  
+> **最新版本**: v2.2.0  
 > **适用宿主**: Google Antigravity 2.0+ (桌面端 Electron 及 IDE 体系)  
 > **运行环境**: Python >= 3.11, Astral `uv`, Zotero (7 / 8 / 9 / 10+)  
 > **文档定位**: 插件开发者指南、系统架构设计、工程开发规范（更新日志详见 [CHANGELOG.md](CHANGELOG.md)）
@@ -65,6 +65,9 @@ uv run python tests/test_mcp.py
 
 # 验证 Sidecar 预览侧边栏 API（FastAPI 端点、PDF 分块流传输）
 uv run python tests/test_sidecar.py
+
+# 验证 v2.2.0 安全准出合规性（CORS 拦截、路径穿越防御、离线 CMap、越界响应）
+uv run python tests/test_v220_acceptance.py
 ```
 
 ---
@@ -96,26 +99,27 @@ zotero-in-ag/
 ├── src/
 │   ├── core/                    # 核心业务与底层数据引擎
 │   │   ├── __init__.py          # 模块导出标识
-│   │   ├── config.py            # 跨平台数据目录/安装路径阶梯式智能探测
-│   │   ├── db.py                # SQLite 高性能只读驱动（mode=ro&immutable=1 无锁保障）
-│   │   ├── storage.py           # Zotero storage/ 物理 PDF 路径反向查找引擎
-│   │   ├── pdf_extractor.py     # 基于 pypdf 的正文提取与安全字符守卫
-│   │   └── zotero_api.py        # Zotero 本地桌面端交互桥梁（独立笔记、防抖定位、跨平台 URI）
+│   │   ├── config.py            # 跨平台数据目录/安装路径阶梯式智能探测（支持 prefs.js 与注册表嗅探）
+│   │   ├── db.py                # SQLite 高性能只读驱动（mode=ro WAL 实时感知 + 退避重试）
+│   │   ├── storage.py           # Zotero storage/ 物理 PDF 路径反向查找引擎（防路径穿越 + Linked Files 架构支持）
+│   │   ├── pdf_extractor.py     # 基于 pypdf 的正文提取与安全字符守卫（规范化越界响应）
+│   │   └── zotero_api.py        # Zotero 本地桌面端交互桥梁（全异步定位与笔记写入、HTML 转义）
 │   ├── mcp_server/              # MCP 工具协议层
 │   │   ├── __init__.py          # 模块导出标识
-│   │   └── server.py            # 面向 Agent 暴露的 6 大原子学术工具
+│   │   └── server.py            # 面向 Agent 暴露的 6 大原子学术工具（分类树防环路、笔记摘要保护）
 │   └── sidecar/                 # 预览副面板 Web 服务与前端应用
 │       ├── __init__.py          # 模块导出标识
-│       ├── server.py            # FastAPI Web 服务、RFC 5987 编码与 PDF 分块传输
+│       ├── server.py            # FastAPI Web 服务、收紧 CORS、全异步网络 I/O、批注全流程原子锁
 │       └── static/              # 前端单页面 Webview
 │           ├── index.html       # 极简双栏布局（目录抽屉 + 自适应 PDF 舞台）
 │           ├── css/app.css      # 原生 Antigravity 图标适配、无极滚动与深色系样式
-│           ├── js/app.js        # PDF.js 惰性渲染驱动、宽度自动缩放、划选动作浮窗
-│           └── vendor/pdfjs/    # 离线打包的 Mozilla PDF.js 核心库与 Web Worker
+│           ├── js/app.js        # PDF.js 惰性渲染驱动、宽度自动缩放、离线 CMap、视口 Canvas 内存回收
+│           └── vendor/pdfjs/    # 离线打包的 Mozilla PDF.js 核心库、Web Worker 与 169 份 CMap 字体资源
 └── tests/                       # 单元与集成测试套件
     ├── test_core.py             # 核心数据库与存储读取测试
-    ├── test_mcp.py              # MCP 工具层调用功能测试
-    └── test_sidecar.py          # FastAPI 接口与 PDF 流传输测试
+    ├── test_mcp.py              # MCP 工具层调用功能测试（动态条目解耦）
+    ├── test_sidecar.py          # FastAPI 接口与 PDF 流传输测试（防御性测试）
+    └── test_v220_acceptance.py   # v2.2.0 安全与准出验证专用套件
 ```
 
 ---

@@ -45,7 +45,18 @@ class PDFExtractor:
 
         # Normalize 1-indexed pages
         start = max(1, start_page)
-        end = min(total_pages, end_page) if end_page else min(total_pages, start + 9)
+        if start > total_pages:
+            return {
+                "total_pages": total_pages,
+                "start_page": start,
+                "end_page": start,
+                "extracted_pages_count": 0,
+                "total_chars": 0,
+                "is_truncated": False,
+                "content": f"[页码越界：起始页码 {start} 超出文档总页数 {total_pages}]",
+            }
+
+        end = min(total_pages, max(start, end_page)) if end_page else min(total_pages, start + 9)
 
         extracted_pages = []
         total_chars = 0

@@ -842,7 +842,7 @@ wheels = [
 
 [[package]]
 name = "zotero-in-ag"
-version = "2.1.0"
+version = "2.2.0"
 source = { editable = "." }
 dependencies = [
     { name = "fastapi" },
@@ -857,7 +857,7 @@ dependencies = [
 requires-dist = [
     { name = "fastapi", specifier = ">=0.115.0" },
     { name = "httpx", specifier = ">=0.28.0" },
-    { name = "mcp", specifier = ">=1.2.0" },
+    { name = "mcp", specifier = ">=2.3.0,<3" },
     { name = "pydantic", specifier = ">=2.10.0" },
     { name = "pypdf", specifier = ">=5.1.0" },
     { name = "uvicorn", specifier = ">=0.32.0" },

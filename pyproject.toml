@@ -1,6 +1,6 @@
 [project]
 name = "zotero-in-ag"
-version = "2.1.0"
+version = "2.2.0"
 description = "Zotero in AG: Native literature viewer, PDF reader, and MCP academic tools for Google Antigravity."
 readme = "README.md"
 authors = [
@@ -10,7 +10,7 @@ requires-python = ">=3.11"
 dependencies = [
     "fastapi>=0.115.0",
     "httpx>=0.28.0",
-    "mcp>=1.2.0",
+    "mcp>=2.3.0,<3",
     "pydantic>=2.10.0",
     "pypdf>=5.1.0",
     "uvicorn>=0.32.0",

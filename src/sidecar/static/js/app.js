@@ -146,8 +146,11 @@ function setupEventListeners() {
       sortItemsLocally();
       renderItems();
 
-      const q = searchInputEl.value.trim();
-      loadItems(q);
+      // If items reach server query limit, load from backend to get true global sorted window
+      if (state.items.length >= 100) {
+        const q = searchInputEl.value.trim();
+        loadItems(q);
+      }
     });
   }
 
@@ -581,7 +584,7 @@ async function checkHealth() {
     const res = await fetch('/api/health');
     const data = await res.json();
     if (data.zotero_running) {
-      statusBadgeEl.innerHTML = `<span class="status-dot"></span> Zotero 10 运行中`;
+      statusBadgeEl.innerHTML = `<span class="status-dot"></span> Zotero 桌面端运行中`;
     } else {
       statusBadgeEl.innerHTML = `<span class="status-dot" style="background: #f9e2af"></span> 本地 SQLite 直读`;
     }
@@ -782,7 +785,7 @@ async function loadPdfContinuous(pdfUrl) {
 
     const loadingTask = pdfjsLib.getDocument({
       url: pdfUrl,
-      cMapUrl: 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/cmaps/',
+      cMapUrl: '/static/vendor/pdfjs/cmaps/',
       cMapPacked: true,
     });
 
@@ -1188,6 +1191,21 @@ function setupContinuousObserver() {
         state.currentPageNum = pageNum;
         pageIndicatorEl.textContent = `${pageNum} / ${state.totalPdfPages}`;
         renderPage(pageNum);
+      } else {
+        // Recycle canvas pixel buffer to deallocate memory when page scrolls out of viewport
+        const pageWrapper = entry.target;
+        const canvas = pageWrapper.querySelector('canvas');
+        if (canvas && state.renderedPages.has(pageNum)) {
+          const ctx = canvas.getContext('2d');
+          ctx?.clearRect(0, 0, canvas.width, canvas.height);
+          canvas.width = 1;
+          canvas.height = 1;
+          const textLayer = pageWrapper.querySelector('.textLayer');
+          if (textLayer) {
+            textLayer.innerHTML = '';
+          }
+          state.renderedPages.delete(pageNum);
+        }
       }
     });
   }, options);

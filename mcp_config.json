@@ -3,6 +3,8 @@
     "zotero": {
       "command": "uv",
       "args": [
+        "--directory",
+        "../..",
         "run",
         "python",
         "src/mcp_server/server.py"

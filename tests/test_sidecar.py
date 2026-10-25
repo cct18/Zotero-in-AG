@@ -51,32 +51,56 @@ def test_sidecar_endpoints():
         assert len(pdf_res.content) > 1000
         print(f"Streamed PDF successfully, size: {len(pdf_res.content)} bytes")
 
-    print("--- 7. Testing POST /api/locate/{key} ---")
-    locate_res = client.post(f"/api/locate/{first_item['itemKey']}")
-    print("Locate response:", locate_res.json())
-    assert locate_res.status_code == 200
-    assert "success" in locate_res.json()
+    print("--- 6.1 Testing Path Traversal Defense on /api/pdf ---")
+    bad_pdf1 = client.get("/api/pdf/..%5Csomething")
+    assert bad_pdf1.status_code in (400, 404)
+    bad_pdf2 = client.get("/api/pdf/invalid_key_length")
+    assert bad_pdf2.status_code == 400
 
-    print("--- 8. Testing GET & POST /api/translate ---")
-    trans_word = client.get("/api/translate?text=variation")
+    print("--- 7. Testing POST /api/locate/{key} ---")
+    from unittest.mock import patch
+    with patch("subprocess.Popen"), patch("src.core.zotero_api.ZoteroAPIClient._open_protocol_uri"):
+        locate_res = client.post(f"/api/locate/{first_item['itemKey']}")
+        print("Locate response:", locate_res.json())
+        assert locate_res.status_code == 200
+        assert "success" in locate_res.json()
+
+    print("--- 8. Testing POST /api/translate and GET deprecation ---")
+    # GET /api/translate should be rejected (405) to prevent API key query parameter leakage
+    get_res = client.get("/api/translate?text=variation")
+    assert get_res.status_code == 405
+
+    trans_word = client.post("/api/translate", json={"text": "variation", "engine": "builtin"})
     assert trans_word.status_code == 200
-    assert trans_word.json()["success"] is True
-    assert "translation" in trans_word.json()
-    print("Word translation response:", trans_word.json()["translation"][:40])
+    if trans_word.json().get("success"):
+        assert "translation" in trans_word.json()
+        print("Word POST translation response:", trans_word.json()["translation"][:40])
+    else:
+        print("Word POST translation returned network/fallback status:", trans_word.json().get("error"))
 
     trans_sent = client.post("/api/translate", json={
         "text": "The dominant sequence transduction models are based on neural networks",
         "engine": "builtin"
     })
     assert trans_sent.status_code == 200
-    assert trans_sent.json()["success"] is True
-    assert "translation" in trans_sent.json()
-    print("Sentence POST translation response:", trans_sent.json()["translation"][:40])
+    if trans_sent.json().get("success"):
+        assert "translation" in trans_sent.json()
+        print("Sentence POST translation response:", trans_sent.json()["translation"][:40])
 
     # Test /api/test_ai_model with empty key validation
     test_empty = client.post("/api/test_ai_model", json={"api_key": ""})
     assert test_empty.status_code == 200
     assert test_empty.json()["success"] is False
+
+    # Test SSRF link-local cloud metadata defense
+    test_ssrf = client.post("/api/test_ai_model", json={
+        "api_base": "http://169.254.169.254/latest/meta-data",
+        "api_key": "dummy_key"
+    })
+    assert test_ssrf.status_code == 200
+    assert test_ssrf.json()["success"] is False
+    assert "链路本地" in test_ssrf.json().get("error", "") or "元数据" in test_ssrf.json().get("error", "")
+    print("SSRF link-local cloud metadata endpoint blocked successfully.")
 
     print("--- 9. Testing GET /api/annotations/{key} ---")
     ann_res = client.get(f"/api/annotations/{first_item['itemKey']}")

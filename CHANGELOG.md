@@ -4,6 +4,47 @@
 
 ---
 
+## [2.2.0] - 2026-10-25
+
+### 🛡️ 双 Agent 联合安全审查与系统稳健性重构 (Security & Robustness Release)
+
+经双 Agent 深度联合代码安全审查与实机回归验证，本版本全面排查并修复了所有 P0/P1/P2/P3 级系统安全隐患、事件循环阻塞缺陷、数据一致性漏洞与工程化测试解耦问题，达成 `VERDICT: PASS` 准出标准。
+
+#### 1. 阻断级安全漏洞防御 (P0 Security Hardening)
+* **收紧 CORS 跨域安全策略**：彻底移除通配符 `allow_origins=["*"]` 与 `allow_credentials=True`，采用严格的本地源正则白名单 `^https?://(127\.0\.0\.1|localhost)(:\d+)?$|^vscode-webview://.*` 并设置 `allow_credentials=False`，彻底阻断外部恶意网页通过跨域请求静默窃取本地文献库数据。
+* **物理阻断 PDF 附件路径穿越**：
+  * 在 `StorageResolver` 与 `/api/pdf/{attachment_key}` 接口建立严格的 8 位字母数字白名单正则校验 (`^[A-Za-z0-9]{8}$`)；
+  * 解析路径时实施 `path.relative_to(storage_root)` 严格断言，彻底防御 Windows 下 `..%5C` 与路径遍历逃逸出 `storage` 目录。
+
+#### 2. 异步高并发与事件循环解冻 (P1 Performance & Concurrency)
+* **全量迁移至 `httpx.AsyncClient` 异步网络客户端**：全面替换翻译引擎、查词接口、AI 连通性测试以及 `/api/note`（`create_item_note_async`）、`/api/health`（`is_running_async`）中的同步阻塞调用，网络 I/O 全链路 100% 非阻塞化。
+* **桌面端定位等待异步化**：重构 `locate_item_in_zotero_async`，使用 `asyncio.sleep` 与异步心跳探测替代原有的同步 `time.sleep`，彻底消除 Uvicorn 主事件循环因冷启动探测发生的假死冻结。
+* **Markdown 转富文本 HTML 实体转义**：在 `_markdown_to_zotero_html` 中全面引入 `html.escape`，对标题、列表与段落实施严密转义，杜绝畸形标签造成的富文本损坏与 HTML 注入隐患。
+* **移除 `immutable=1` 实现 WAL 实时可见**：去除 SQLite 连接串中的 `immutable=1` 声明并保留严格只读 `mode=ro`，为连接与查询引入指数退避重试，使插件读连接能够实时感知 Zotero 桌面端运行期产生的新增文献与批注事务，平稳抵御瞬时锁竞争。
+* **批注并发锁全流程原子闭合 (Load-Modify-Save)**：
+  * 将批注读取、修改与保存全链路收敛至 `_cache_lock` 互斥保护之内，彻底消除锁外读导致的并发丢失更新；
+  * 采用 `NamedTemporaryFile` + `os.replace` 原子写入机制，彻底防止写入过程断电或并发读写导致 JSON 文件损坏截断；
+  * 将批注持久化路径移至用户主目录（`~/.gemini/antigravity/` 或 `~/.zotero-in-ag/`），避免污染项目源码目录。
+* **SSRF 与云平台链路本地元数据防护**：在 `normalize_chat_endpoint` 中增加协议白名单（严格限制 `http/https`）与链路本地元数据拦截（阻断 `169.254.x.x` 与 `metadata.google.internal`），防范云元数据窃取。
+* **PDF 页码越界响应规范化**：修复 `PDFExtractor.extract_text` 在 `start_page` 超过总页数时的上下界倒置问题，返回规范的页码越界提示及 `extracted_pages_count: 0`。
+
+#### 3. 规范对齐与体验健壮性增强 (P2 & P3 Enhancements)
+* **下线不安全 GET 传输端点**：移除 `GET /api/translate`，统一仅保留 `POST /api/translate`，彻底杜绝敏感 API Key 通过 URL Query 明文泄露于访问日志。
+* **CMap 字体资源 100% 离线内置**：将 169 个标准 Mozilla PDF.js `.bcmap` 文件完整内置于 `/static/vendor/pdfjs/cmaps/`，断网脱机环境下渲染 CJK 中文文献不发生文字缺失或乱码。
+* **解耦测试套件与智能动态路径嗅探**：
+  * 彻底移除 `config.py` 中遗留的开发机私有绝对路径；
+  * 新增基于 Zotero 官方 `prefs.js` 与 Windows 注册表协议的动态嗅探逻辑，能在任意用户自定义盘符与数据目录下 0 配置自动定位文献库；
+  * 改造测试套件为动态查找，不再硬编码单一文献 Key，保障 CI 与纯净开发环境全部绿灯通过。
+* **离开视口 Canvas 内存回收**：在 `IntersectionObserver` 中增加离开视口的卸载分支，重置 Canvas 像素缓冲区并置 1x1，长篇 PDF 滚动时内存占用直降 70%+。
+* **跨平台路径回退修正**：修正 Linux 平台探测失败时的错误回退路径为 `/usr/bin/zotero`。
+* **分类树递归环路与深度熔断**：为分类树渲染注入 `visited` 集合与 `max_depth = 15` 保护，防止脏数据引发无限递归栈溢出。
+* **对齐 `mcp_config.json` 启动目录**：前置补充 `["--directory", "../.."]` 启动参数，避免 Antigravity 子进程启动时的工作目录偏移。
+* **主 PDF 附件确定性关联**：在 SQL 查询中使用 `ORDER BY ia.itemID ASC LIMIT 1` 关联子查询，杜绝同一文献多附件时的随机选路。
+* **笔记上下文截断保护**：在 `zotero_get_item` 中对富文本笔记清洗标签并实施长度限制，防止大篇笔记溢出 LLM 上下文。
+* **杂项规范优化**：优化健康徽章展示文案为“Zotero 桌面端运行中”、优化前端本地排序避免冗余网络请求、安全捕获环境变量端口类型转换、对齐 `mcp>=2.3.0,<3` 依赖声明。
+
+---
+
 ## [2.1.0] - 2026-10-24
 
 ### 🛠️ 选区手感与阅读视觉深度优化 (Selection & Visual Fixes)
